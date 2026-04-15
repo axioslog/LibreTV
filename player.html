@@ -80,13 +80,6 @@
                     <div id="error-message">视频加载失败</div>
                     <div class="error-message-sub">请尝试其他视频源或稍后重试</div>
                 </div>
-                <button id="cacheDownloadBtn" class="cache-download-btn" onclick="toggleCacheDownload()" title="缓存当前视频">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                    <span id="cacheBtnText">缓存</span>
-                </button>
-                <div id="cacheProgressBar" class="cache-progress-bar">
-                    <div id="cacheProgressFill" class="cache-progress-fill" style="width: 0%"></div>
-                </div>
                 <div id="swipeSeekOverlay" class="swipe-seek-overlay">
                     <div class="swipe-seek-indicator">
                         <div class="swipe-seek-icon" id="swipeSeekIcon">⏩</div>
@@ -251,6 +244,7 @@
     <script src="js/api.js"></script>
     <script src="js/search.js"></script>
     <script src="js/player.js"></script>
+    <script src="js/pwa-register.js"></script>
 
     <script>
         // 创建全局环境变量对象

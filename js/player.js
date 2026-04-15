@@ -119,6 +119,20 @@ function initializePageContent() {
 
     // 解析URL参数
     const urlParams = new URLSearchParams(window.location.search);
+    
+    const offlineMode = urlParams.get('offline');
+    if (offlineMode === 'true') {
+        const offlineId = urlParams.get('id');
+        const offlineTitle = urlParams.get('title') || '离线视频';
+        if (offlineId) {
+            currentVideoTitle = offlineTitle;
+            document.getElementById('videoTitle').textContent = offlineTitle;
+            document.title = offlineTitle + ' - LibreTV播放器';
+            playOfflineById(offlineId);
+            return;
+        }
+    }
+    
     let videoUrl = urlParams.get('url');
     const title = urlParams.get('title');
     const sourceCode = urlParams.get('source');
@@ -457,10 +471,11 @@ function updateSpeedDisplay() {
 }
 
 // 初始化播放器
-function initPlayer(videoUrl) {
+function initPlayer(videoUrl, options = {}) {
     if (!videoUrl) {
         return
     }
+    const isOffline = options.isOffline || false;
 
     // 销毁旧实例
     if (art) {
@@ -472,7 +487,7 @@ function initPlayer(videoUrl) {
     // 配置HLS.js选项
     const hlsConfig = {
         debug: false,
-        loader: adFilteringEnabled ? CustomHlsJsLoader : Hls.DefaultConfig.loader,
+        loader: (adFilteringEnabled && !isOffline) ? CustomHlsJsLoader : Hls.DefaultConfig.loader,
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 90,
@@ -533,6 +548,14 @@ function initPlayer(videoUrl) {
             crossOrigin: 'anonymous',
         },
         controls: [
+            {
+                position: 'right',
+                html: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>',
+                tooltip: '离线缓存',
+                click: function () {
+                    showOfflineModal();
+                },
+            },
             {
                 position: 'right',
                 html: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>',
@@ -827,7 +850,6 @@ function initPlayer(videoUrl) {
             });
         }
         setupSwipeSeek();
-        checkCacheStatus();
     });
 
     // 10秒后如果仍在加载，但不立即显示错误
@@ -1889,244 +1911,589 @@ async function switchToResource(sourceKey, vodId) {
 }
 
 // =================================
-// ========== 缓存下载功能 ==========
+// ========== 离线缓存功能 ==========
 // =================================
-let cacheDB = null;
-let isCaching = false;
-let cacheAbortController = null;
+let offlineDB = null;
+let activeCaches = {};
 
-function openCacheDB() {
+function openOfflineDB() {
     return new Promise((resolve, reject) => {
-        if (cacheDB) { resolve(cacheDB); return; }
-        const request = indexedDB.open('LibreTVCache', 2);
+        if (offlineDB) { resolve(offlineDB); return; }
+        const request = indexedDB.open('LibreTVOffline', 4);
         request.onupgradeneeded = (e) => {
             const db = e.target.result;
-            if (!db.objectStoreNames.contains('fragments')) {
-                db.createObjectStore('fragments', { keyPath: 'url' });
+            if (!db.objectStoreNames.contains('videos')) {
+                db.createObjectStore('videos', { keyPath: 'id' });
             }
-            if (!db.objectStoreNames.contains('metadata')) {
-                db.createObjectStore('metadata', { keyPath: 'videoId' });
+            if (!db.objectStoreNames.contains('segments')) {
+                db.createObjectStore('segments', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('blobs')) {
+                db.createObjectStore('blobs', { keyPath: 'id' });
             }
         };
-        request.onsuccess = (e) => { cacheDB = e.target.result; resolve(cacheDB); };
+        request.onsuccess = (e) => { offlineDB = e.target.result; resolve(offlineDB); };
         request.onerror = (e) => reject(e.target.error);
     });
 }
 
-async function getCachedMetadata(videoId) {
-    const db = await openCacheDB();
+async function saveOfflineVideo(record) {
+    const db = await openOfflineDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction('metadata', 'readonly');
-        const store = tx.objectStore('metadata');
-        const req = store.get(videoId);
+        const tx = db.transaction('videos', 'readwrite');
+        tx.objectStore('videos').put(record);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function getOfflineVideo(id) {
+    const db = await openOfflineDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('videos', 'readonly');
+        const req = tx.objectStore('videos').get(id);
         req.onsuccess = () => resolve(req.result || null);
         req.onerror = () => reject(req.error);
     });
 }
 
-async function setCachedMetadata(metadata) {
-    const db = await openCacheDB();
+async function getAllOfflineVideos() {
+    const db = await openOfflineDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction('metadata', 'readwrite');
-        const store = tx.objectStore('metadata');
-        const req = store.put(metadata);
-        req.onsuccess = () => resolve();
+        const tx = db.transaction('videos', 'readonly');
+        const req = tx.objectStore('videos').getAll();
+        req.onsuccess = () => resolve(req.result || []);
         req.onerror = () => reject(req.error);
     });
 }
 
-async function cacheFragment(url, data) {
-    const db = await openCacheDB();
+async function deleteOfflineVideo(id) {
+    const db = await openOfflineDB();
+    const video = await getOfflineVideo(id);
+    const segmentCount = video?.segmentCount || 0;
+    const keyCount = video?.keyCount || 0;
     return new Promise((resolve, reject) => {
-        const tx = db.transaction('fragments', 'readwrite');
-        const store = tx.objectStore('fragments');
-        const req = store.put({ url, data, timestamp: Date.now() });
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
+        const storeNames = ['videos', 'segments', 'blobs'];
+        const tx = db.transaction(storeNames, 'readwrite');
+        tx.objectStore('videos').delete(id);
+        tx.objectStore('blobs').delete(id);
+        for (let i = 0; i < segmentCount; i++) {
+            tx.objectStore('segments').delete(id + '_' + i);
+        }
+        for (let i = 0; i < keyCount; i++) {
+            tx.objectStore('segments').delete(id + '_key_' + i);
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
     });
 }
 
-async function getCachedFragment(url) {
-    const db = await openCacheDB();
+async function saveSegment(id, data) {
+    const db = await openOfflineDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction('fragments', 'readonly');
-        const store = tx.objectStore('fragments');
-        const req = store.get(url);
+        const tx = db.transaction('segments', 'readwrite');
+        tx.objectStore('segments').put({ id, data, timestamp: Date.now() });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function getSegment(id) {
+    const db = await openOfflineDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('segments', 'readonly');
+        const req = tx.objectStore('segments').get(id);
         req.onsuccess = () => resolve(req.result ? req.result.data : null);
         req.onerror = () => reject(req.error);
     });
 }
 
-async function getCacheSize() {
-    const db = await openCacheDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction('fragments', 'readonly');
-        const store = tx.objectStore('fragments');
-        const req = store.getAll();
-        req.onsuccess = () => {
-            let totalSize = 0;
-            const results = req.result || [];
-            results.forEach(item => {
-                if (item.data && item.data.byteLength) totalSize += item.data.byteLength;
-                else if (typeof item.data === 'string') totalSize += item.data.length * 2;
-            });
-            resolve(totalSize);
-        };
-        req.onerror = () => reject(req.error);
+function getOfflineCacheId(episodeIndex) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const sourceCode = urlParams.get('source') || 'unknown';
+    const videoId = urlParams.get('id') || '';
+    return `${sourceCode}_${videoId}_${episodeIndex}`;
+}
+
+function getOfflineEpisodeName(ep, index) {
+    if (typeof ep === 'string' && ep.includes('$')) return ep.split('$')[0];
+    return '第' + (index + 1) + '集';
+}
+
+function getOfflineEpisodeUrl(ep) {
+    if (typeof ep === 'string') return ep.includes('$') ? ep.split('$').pop() : ep;
+    return ep;
+}
+
+function showOfflineModal() {
+    const modal = document.getElementById('modal');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalContent = document.getElementById('modalContent');
+    modalTitle.textContent = '离线缓存';
+    
+    const episodes = currentEpisodes || [];
+    const currentIndex = currentEpisodeIndex || 0;
+    
+    let html = '<div style="padding:16px;max-height:60vh;overflow-y:auto;">';
+    html += '<div style="margin-bottom:16px;display:flex;gap:8px;">';
+    html += '<button onclick="cacheAllEpisodes()" style="flex:1;padding:10px;background:linear-gradient(135deg,#00ccff,#0088ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">缓存全部 (' + episodes.length + '集)</button>';
+    html += '<button onclick="cacheCurrentEpisode()" style="flex:1;padding:10px;background:linear-gradient(135deg,#00ff88,#00cc66);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">缓存当前集</button>';
+    html += '</div>';
+    html += '<div style="margin-bottom:12px;font-size:12px;color:#888;">缓存后可离线播放，支持断点续传</div>';
+    html += '<div id="offlineEpisodeList">';
+    episodes.forEach((ep, index) => {
+        const epName = getOfflineEpisodeName(ep, index);
+        const isCurrent = index === currentIndex;
+        html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;margin-bottom:4px;background:${isCurrent ? 'rgba(0,204,255,0.1)' : 'rgba(255,255,255,0.03)'};border:1px solid ${isCurrent ? 'rgba(0,204,255,0.3)' : 'rgba(255,255,255,0.05)'};border-radius:6px;" id="offline-ep-${index}">`;
+        html += `<div style="flex:1;min-width:0;"><span style="font-size:12px;color:${isCurrent ? '#00ccff' : '#ccc'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${isCurrent ? '▶ ' : ''}${epName}</span></div>`;
+        html += `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;" id="offline-actions-${index}">`;
+        html += `<span id="offline-status-${index}" style="font-size:11px;color:#888;"></span>`;
+        html += `<button onclick="cacheEpisode(${index})" style="padding:4px 10px;background:rgba(0,204,255,0.2);border:1px solid rgba(0,204,255,0.3);border-radius:4px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;" id="offline-btn-${index}">缓存</button>`;
+        html += `</div></div>`;
+    });
+    html += '</div>';
+    html += '<div id="offlineProgressArea" style="margin-top:12px;display:none;">';
+    html += '<div style="background:rgba(255,255,255,0.05);border-radius:6px;padding:12px;">';
+    html += '<div style="display:flex;justify-content:space-between;margin-bottom:6px;">';
+    html += '<span id="offlineProgressLabel" style="font-size:12px;color:#ccc;">准备缓存...</span>';
+    html += '<span id="offlineProgressPercent" style="font-size:12px;color:#00ccff;">0%</span>';
+    html += '</div>';
+    html += '<div style="background:rgba(255,255,255,0.1);border-radius:4px;height:6px;overflow:hidden;">';
+    html += '<div id="offlineProgressBar" style="height:100%;background:linear-gradient(90deg,#00ccff,#00ff88);width:0%;transition:width 0.3s;border-radius:4px;"></div>';
+    html += '</div>';
+    html += '<div style="display:flex;justify-content:space-between;margin-top:6px;">';
+    html += '<span id="offlineSpeedLabel" style="font-size:11px;color:#888;"></span>';
+    html += '<span id="offlineSizeLabel" style="font-size:11px;color:#888;"></span>';
+    html += '</div></div></div>';
+    html += '</div>';
+    modalContent.innerHTML = html;
+    modal.classList.remove('hidden');
+    checkOfflineStatuses();
+}
+
+async function checkOfflineStatuses() {
+    const videos = await getAllOfflineVideos();
+    videos.forEach(video => {
+        const idx = video.episodeIndex;
+        const statusEl = document.getElementById('offline-status-' + idx);
+        const btnEl = document.getElementById('offline-btn-' + idx);
+        if (!statusEl || !btnEl) return;
+        if (video.status === 'complete') {
+            statusEl.textContent = '✅ 已缓存'; statusEl.style.color = '#00ff88';
+            btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:4px 10px;background:rgba(0,255,136,0.2);border:1px solid rgba(0,255,136,0.3);border-radius:4px;color:#00ff88;font-size:11px;cursor:pointer;';
+            btnEl.onclick = () => playOfflineById(video.id);
+        } else if (video.status === 'caching') {
+            statusEl.textContent = `⬇ ${video.progress || 0}%`; statusEl.style.color = '#00ccff';
+            btnEl.textContent = '暂停'; btnEl.onclick = () => pauseCacheEpisode(idx);
+        } else if (video.status === 'paused') {
+            statusEl.textContent = `⏸ ${video.progress || 0}%`; statusEl.style.color = '#ffcc00';
+            btnEl.textContent = '继续'; btnEl.onclick = () => cacheEpisode(idx);
+        } else if (video.status === 'error') {
+            statusEl.textContent = '❌ 失败'; statusEl.style.color = '#ff3333';
+            btnEl.textContent = '重试'; btnEl.onclick = () => cacheEpisode(idx);
+        }
     });
 }
 
-async function toggleCacheDownload() {
-    const btn = document.getElementById('cacheDownloadBtn');
-    const btnText = document.getElementById('cacheBtnText');
-    
-    if (isCaching) {
-        isCaching = false;
-        if (cacheAbortController) cacheAbortController.abort();
-        btn.classList.remove('caching');
-        btnText.textContent = '缓存';
-        showToast('缓存已停止', 'info');
-        return;
-    }
-    
-    if (!currentHls || !art || !art.video) {
-        showToast('请先播放视频', 'error');
-        return;
-    }
-    
-    const videoId = getVideoId();
-    const existing = await getCachedMetadata(videoId);
-    if (existing && existing.status === 'complete') {
-        showToast('该视频已缓存完成', 'success');
-        btn.classList.add('cached');
-        btnText.textContent = '已缓存';
-        return;
-    }
-    
-    isCaching = true;
-    cacheAbortController = new AbortController();
-    btn.classList.add('caching');
-    btn.classList.remove('cached');
-    btnText.textContent = '缓存中...';
-    
-    const progressBar = document.getElementById('cacheProgressBar');
-    const progressFill = document.getElementById('cacheProgressFill');
-    progressBar.classList.add('active');
-    
-    try {
-        const hls = currentHls;
-        const levels = hls.levels;
-        if (!levels || levels.length === 0) {
-            throw new Error('无可用的视频流');
-        }
-        
-        const currentLevel = hls.currentLevel >= 0 ? hls.currentLevel : 0;
-        const level = levels[currentLevel];
-        const baseUrl = level.url ? level.url.substring(0, level.url.lastIndexOf('/') + 1) : '';
-        
-        const metadata = {
-            videoId,
-            title: currentVideoTitle,
-            episodeIndex: currentEpisodeIndex,
-            levelIndex: currentLevel,
-            baseUrl,
-            m3u8Url: level.url || currentVideoUrl,
-            totalFrags: level.details ? level.details.fragments.length : 0,
-            cachedFrags: existing ? (existing.cachedFrags || 0) : 0,
-            status: 'caching',
-            timestamp: Date.now()
-        };
-        
-        await setCachedMetadata(metadata);
-        
-        const fragments = level.details ? level.details.fragments : [];
-        const startFrag = metadata.cachedFrags;
-        
-        for (let i = startFrag; i < fragments.length; i++) {
-            if (!isCaching) break;
-            
-            const frag = fragments[i];
-            const fragUrl = frag.url.startsWith('http') ? frag.url : baseUrl + frag.url;
-            
-            const cachedData = await getCachedFragment(fragUrl);
-            if (cachedData) {
-                metadata.cachedFrags = i + 1;
-                await setCachedMetadata(metadata);
-                continue;
-            }
-            
-            try {
-                let fetchUrl = fragUrl;
-                if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
-                    fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(fragUrl));
-                } else {
-                    fetchUrl = PROXY_URL + encodeURIComponent(fragUrl);
-                }
-                const response = await fetch(fetchUrl, {
-                    signal: cacheAbortController.signal
-                });
-                const arrayBuffer = await response.arrayBuffer();
-                await cacheFragment(fragUrl, arrayBuffer);
-                
-                metadata.cachedFrags = i + 1;
-                await setCachedMetadata(metadata);
-                
-                const progress = ((i + 1) / fragments.length * 100).toFixed(0);
-                progressFill.style.width = progress + '%';
-                btnText.textContent = progress + '%';
-            } catch (fetchErr) {
-                if (fetchErr.name === 'AbortError') break;
-                continue;
-            }
-        }
-        
-        if (isCaching && metadata.cachedFrags >= fragments.length) {
-            metadata.status = 'complete';
-            await setCachedMetadata(metadata);
-            btn.classList.remove('caching');
-            btn.classList.add('cached');
-            btnText.textContent = '已缓存';
-            showToast('视频缓存完成！', 'success');
-        } else if (!isCaching) {
-            metadata.status = 'paused';
-            await setCachedMetadata(metadata);
-            showToast(`已缓存 ${metadata.cachedFrags}/${fragments.length} 片段，可继续缓存`, 'info');
-        }
-    } catch (error) {
-        console.error('缓存失败:', error);
-        showToast('缓存失败: ' + error.message, 'error');
-        btn.classList.remove('caching');
-        btnText.textContent = '缓存';
-    } finally {
-        isCaching = false;
-        progressBar.classList.remove('active');
+async function cacheEpisode(index) {
+    if (!currentEpisodes || !currentEpisodes[index]) { showToast('无法获取视频地址', 'error'); return; }
+    const epUrl = getOfflineEpisodeUrl(currentEpisodes[index]);
+    const epName = getOfflineEpisodeName(currentEpisodes[index], index);
+    const cacheId = getOfflineCacheId(index);
+    const existing = await getOfflineVideo(cacheId);
+    if (existing && existing.status === 'complete') { playOfflineById(cacheId); return; }
+    if (existing && existing.status === 'caching') { pauseCacheEpisode(index); return; }
+    startEpisodeCache(cacheId, index, epUrl, epName);
+}
+
+async function cacheCurrentEpisode() { await cacheEpisode(currentEpisodeIndex || 0); }
+
+async function cacheAllEpisodes() {
+    if (!currentEpisodes || currentEpisodes.length === 0) { showToast('没有可缓存的剧集', 'error'); return; }
+    showToast(`开始缓存全部 ${currentEpisodes.length} 集`, 'info');
+    for (let i = 0; i < currentEpisodes.length; i++) {
+        const cacheId = getOfflineCacheId(i);
+        const existing = await getOfflineVideo(cacheId);
+        if (existing && (existing.status === 'complete' || existing.status === 'caching')) continue;
+        await cacheEpisode(i);
+        await new Promise(r => setTimeout(r, 300));
     }
 }
 
-async function checkCacheStatus() {
-    const btn = document.getElementById('cacheDownloadBtn');
-    const btnText = document.getElementById('cacheBtnText');
-    if (!btn || !btnText) return;
+async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName) {
+    const statusEl = document.getElementById('offline-status-' + episodeIndex);
+    const btnEl = document.getElementById('offline-btn-' + episodeIndex);
+    const progressArea = document.getElementById('offlineProgressArea');
+    
+    if (statusEl) { statusEl.textContent = '⬇ 解析中...'; statusEl.style.color = '#00ccff'; }
+    if (btnEl) { btnEl.textContent = '暂停'; btnEl.onclick = () => pauseCacheEpisode(episodeIndex); }
+    if (progressArea) progressArea.style.display = 'block';
+    
+    const abortController = new AbortController();
+    const record = {
+        id: cacheId,
+        episodeIndex,
+        m3u8Url,
+        episodeName,
+        title: currentVideoTitle,
+        status: 'caching',
+        progress: 0,
+        timestamp: Date.now()
+    };
+    await saveOfflineVideo(record);
+    activeCaches[cacheId] = { controller: abortController };
     
     try {
-        const videoId = getVideoId();
-        const metadata = await getCachedMetadata(videoId);
-        if (metadata) {
-            if (metadata.status === 'complete') {
-                btn.classList.add('cached');
-                btnText.textContent = '已缓存';
-            } else if (metadata.status === 'paused') {
-                btnText.textContent = '继续缓存';
-            } else if (metadata.status === 'caching') {
-                btn.classList.add('caching');
-                const progress = metadata.totalFrags > 0 
-                    ? (metadata.cachedFrags / metadata.totalFrags * 100).toFixed(0) 
-                    : '0';
-                btnText.textContent = progress + '%';
+        updateOfflineProgress(episodeName, 0, 0, 0);
+        
+        const { segmentUrls, m3u8Content, keyInfos } = await parseM3u8AndGetSegments(m3u8Url, abortController.signal);
+        if (segmentUrls.length === 0) throw new Error('未找到视频分片');
+        
+        record.m3u8Content = m3u8Content;
+        record.segmentCount = segmentUrls.length;
+        record.segmentUrls = segmentUrls;
+        record.keyCount = keyInfos.length;
+        
+        for (let k = 0; k < keyInfos.length; k++) {
+            if (abortController.signal.aborted) break;
+            try {
+                const keyData = await downloadSegment(keyInfos[k].uri, abortController.signal);
+                await saveSegment(cacheId + '_key_' + k, keyData);
+            } catch (keyErr) {
+                console.warn('加密密钥下载失败:', keyErr);
             }
         }
-    } catch (e) {
+        
+        if (statusEl) { statusEl.textContent = `⬇ 0/${segmentUrls.length}`; }
+        updateOfflineProgress(episodeName, 0, 0, 0);
+        
+        let totalBytes = 0;
+        let lastTime = Date.now();
+        let lastBytes = 0;
+        
+        for (let i = 0; i < segmentUrls.length; i++) {
+            if (abortController.signal.aborted) break;
+            
+            let segData = null;
+            let retries = 3;
+            while (retries > 0 && !segData) {
+                try {
+                    segData = await downloadSegment(segmentUrls[i], abortController.signal);
+                } catch (segErr) {
+                    if (segErr.name === 'AbortError') throw segErr;
+                    retries--;
+                    if (retries <= 0) throw new Error('分片下载失败: 第' + (i + 1) + '段');
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+            
+            await saveSegment(cacheId + '_' + i, segData);
+            totalBytes += segData.byteLength;
+            
+            const progress = Math.round((i + 1) / segmentUrls.length * 100);
+            record.progress = progress;
+            
+            const now = Date.now();
+            const elapsed = (now - lastTime) / 1000;
+            const speed = elapsed > 0 ? (totalBytes - lastBytes) / elapsed : 0;
+            if (now - lastTime > 1000) { lastTime = now; lastBytes = totalBytes; }
+            
+            if (statusEl) { statusEl.textContent = `⬇ ${i + 1}/${segmentUrls.length}`; }
+            updateOfflineProgress(episodeName, progress, speed, totalBytes);
+            
+            if (i % 10 === 0) await saveOfflineVideo(record);
+        }
+        
+        if (!abortController.signal.aborted) {
+            record.status = 'complete';
+            record.progress = 100;
+            record.blobSize = totalBytes;
+            await saveOfflineVideo(record);
+            
+            if (statusEl) { statusEl.textContent = '✅ 已缓存'; statusEl.style.color = '#00ff88'; }
+            if (btnEl) { btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:4px 10px;background:rgba(0,255,136,0.2);border:1px solid rgba(0,255,136,0.3);border-radius:4px;color:#00ff88;font-size:11px;cursor:pointer;'; btnEl.onclick = () => playOfflineById(cacheId); }
+            showToast(`${episodeName} 缓存完成`, 'success');
+        }
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            record.status = 'paused';
+            await saveOfflineVideo(record);
+            if (statusEl) { statusEl.textContent = `⏸ ${record.progress}%`; statusEl.style.color = '#ffcc00'; }
+            if (btnEl) { btnEl.textContent = '继续'; btnEl.onclick = () => cacheEpisode(episodeIndex); }
+            showToast(`${episodeName} 缓存已暂停`, 'info');
+        } else {
+            console.error('缓存失败:', err);
+            record.status = 'error';
+            await saveOfflineVideo(record);
+            if (statusEl) { statusEl.textContent = '❌ 失败'; statusEl.style.color = '#ff3333'; }
+            if (btnEl) { btnEl.textContent = '重试'; btnEl.onclick = () => cacheEpisode(episodeIndex); }
+            showToast(`${episodeName} 缓存失败: ${err.message}`, 'error');
+        }
+    } finally {
+        delete activeCaches[cacheId];
     }
+}
+
+function extractKeyInfoFromM3u8(m3u8Content, baseUrl) {
+    const keyInfos = [];
+    const lines = m3u8Content.split('\n');
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('#EXT-X-KEY:')) {
+            const methodMatch = trimmed.match(/METHOD=([^,\s]+)/);
+            const uriMatch = trimmed.match(/URI="([^"]+)"/);
+            if (methodMatch && methodMatch[1] !== 'NONE' && uriMatch) {
+                let keyUri = uriMatch[1];
+                if (!keyUri.startsWith('http') && !keyUri.startsWith('/proxy/')) {
+                    keyUri = baseUrl + keyUri;
+                }
+                keyInfos.push({ method: methodMatch[1], uri: keyUri });
+            }
+        }
+    }
+    return keyInfos;
+}
+
+async function parseM3u8AndGetSegments(m3u8Url, signal) {
+    let proxyUrl = PROXY_URL + encodeURIComponent(m3u8Url);
+    if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+        proxyUrl = await window.ProxyAuth.addAuthToProxyUrl(proxyUrl);
+    }
+    
+    const resp = await fetch(proxyUrl, { signal });
+    if (!resp.ok) throw new Error('M3U8请求失败: HTTP ' + resp.status);
+    let content = await resp.text();
+    let baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
+    
+    const lines = content.split('\n').map(l => l.trim()).filter(l => l);
+    let bestStreamUrl = '';
+    let bestBandwidth = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
+            const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
+            const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
+            if (bandwidth > bestBandwidth && i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
+                bestBandwidth = bandwidth;
+                let streamUrl = lines[i + 1];
+                if (!streamUrl.startsWith('http') && !streamUrl.startsWith('/proxy/')) {
+                    streamUrl = baseUrl + streamUrl;
+                }
+                bestStreamUrl = streamUrl;
+            }
+        }
+    }
+    
+    if (bestStreamUrl) {
+        let streamProxyUrl;
+        if (bestStreamUrl.startsWith('/proxy/')) {
+            streamProxyUrl = bestStreamUrl;
+            if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+                streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
+            }
+        } else {
+            streamProxyUrl = PROXY_URL + encodeURIComponent(bestStreamUrl);
+            if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+                streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
+            }
+        }
+        const streamResp = await fetch(streamProxyUrl, { signal });
+        if (!streamResp.ok) throw new Error('子播放列表请求失败');
+        content = await streamResp.text();
+        if (bestStreamUrl.startsWith('http')) {
+            baseUrl = bestStreamUrl.substring(0, bestStreamUrl.lastIndexOf('/') + 1);
+        }
+    }
+    
+    const segmentUrls = [];
+    const m3u8Lines = content.split('\n');
+    for (const line of m3u8Lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+            if (trimmed.startsWith('http')) {
+                segmentUrls.push(trimmed);
+            } else if (trimmed.startsWith('/proxy/')) {
+                segmentUrls.push(trimmed);
+            } else {
+                segmentUrls.push(baseUrl + trimmed);
+            }
+        }
+    }
+    const keyInfos = extractKeyInfoFromM3u8(content, baseUrl);
+    return { segmentUrls, m3u8Content: content, keyInfos };
+}
+
+async function downloadSegment(segUrl, signal) {
+    let fetchUrl;
+    if (segUrl.startsWith('/proxy/')) {
+        fetchUrl = segUrl;
+        if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+            fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(fetchUrl);
+        }
+    } else {
+        fetchUrl = PROXY_URL + encodeURIComponent(segUrl);
+        if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+            fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(fetchUrl);
+        }
+    }
+    const resp = await fetch(fetchUrl, { signal });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    return await resp.arrayBuffer();
+}
+
+function pauseCacheEpisode(episodeIndex) {
+    const cacheId = getOfflineCacheId(episodeIndex);
+    if (activeCaches[cacheId]) activeCaches[cacheId].controller.abort();
+}
+
+function updateOfflineProgress(name, progress, speed, totalBytes) {
+    const label = document.getElementById('offlineProgressLabel');
+    const percent = document.getElementById('offlineProgressPercent');
+    const bar = document.getElementById('offlineProgressBar');
+    const speedLabel = document.getElementById('offlineSpeedLabel');
+    const sizeLabel = document.getElementById('offlineSizeLabel');
+    if (label) label.textContent = name;
+    if (percent) percent.textContent = progress + '%';
+    if (bar) bar.style.width = progress + '%';
+    if (speedLabel) {
+        if (speed > 0) {
+            speedLabel.textContent = (speed / 1024).toFixed(0) + ' KB/s (' + (speed * 8 / 1000000).toFixed(1) + ' Mbps)';
+        } else {
+            speedLabel.textContent = '';
+        }
+    }
+    if (sizeLabel) sizeLabel.textContent = totalBytes > 0 ? formatBytes(totalBytes) : '';
+}
+
+async function playOfflineById(id) {
+    const video = await getOfflineVideo(id);
+    if (!video || video.status !== 'complete') { showToast('缓存数据不完整', 'error'); return; }
+    
+    if (!video.m3u8Content || !video.segmentCount) {
+        showToast('缓存格式不兼容，请删除后重新缓存', 'error');
+        return;
+    }
+    
+    showToast('正在加载离线缓存: ' + video.episodeName, 'info');
+    
+    try {
+        const swActive = navigator.serviceWorker && navigator.serviceWorker.controller;
+        
+        const m3u8Lines = video.m3u8Content.split('\n');
+        let segIndex = 0;
+        let keyIndex = 0;
+        const rewrittenLines = m3u8Lines.map(line => {
+            const trimmed = line.trim();
+            
+            if (trimmed.startsWith('#EXT-X-KEY:') && trimmed.includes('URI=') && !trimmed.includes('METHOD=NONE')) {
+                if (keyIndex < (video.keyCount || 0)) {
+                    let newUri;
+                    if (swActive) {
+                        newUri = '/offline-key/' + id + '/' + keyIndex;
+                    } else {
+                        newUri = '__OFFLINE_KEY_' + keyIndex + '__';
+                    }
+                    keyIndex++;
+                    return trimmed.replace(/URI="[^"]*"/, 'URI="' + newUri + '"');
+                }
+            }
+            
+            if (trimmed && !trimmed.startsWith('#')) {
+                if (segIndex < video.segmentCount) {
+                    if (swActive) {
+                        return '/offline-seg/' + id + '/' + segIndex++;
+                    } else {
+                        return '__OFFLINE_SEG_' + (segIndex++) + '__';
+                    }
+                }
+            }
+            return line;
+        });
+        const rewrittenM3u8 = rewrittenLines.join('\n');
+        
+        if (swActive) {
+            video.rewrittenM3u8 = rewrittenM3u8;
+            await saveOfflineVideo(video);
+            
+            const m3u8Url = '/offline-m3u8/' + id;
+            currentVideoUrl = m3u8Url;
+            initPlayer(m3u8Url, { isOffline: true });
+        } else {
+            const segments = [];
+            for (let i = 0; i < video.segmentCount; i++) {
+                const segData = await getSegment(id + '_' + i);
+                if (!segData) { showToast('缓存分片数据丢失，请删除后重新缓存', 'error'); return; }
+                segments.push(segData);
+            }
+            
+            const segBlobUrls = segments.map(segData => {
+                const blob = new Blob([segData], { type: 'video/mp2t' });
+                return URL.createObjectURL(blob);
+            });
+            
+            const keyBlobUrls = [];
+            for (let k = 0; k < (video.keyCount || 0); k++) {
+                const keyData = await getSegment(id + '_key_' + k);
+                if (keyData) {
+                    const blob = new Blob([keyData], { type: 'application/octet-stream' });
+                    keyBlobUrls.push(URL.createObjectURL(blob));
+                } else {
+                    keyBlobUrls.push('');
+                }
+            }
+            
+            let finalM3u8 = rewrittenM3u8;
+            for (let k = 0; k < keyBlobUrls.length; k++) {
+                finalM3u8 = finalM3u8.replace('__OFFLINE_KEY_' + k + '__', keyBlobUrls[k]);
+            }
+            for (let s = 0; s < segBlobUrls.length; s++) {
+                finalM3u8 = finalM3u8.replace('__OFFLINE_SEG_' + s + '__', segBlobUrls[s]);
+            }
+            
+            const m3u8Blob = new Blob([finalM3u8], { type: 'application/vnd.apple.mpegurl' });
+            const m3u8BlobUrl = URL.createObjectURL(m3u8Blob);
+            
+            currentVideoUrl = m3u8BlobUrl;
+            initPlayer(m3u8BlobUrl, { isOffline: true });
+        }
+        
+        document.getElementById('player-loading').style.display = 'flex';
+        document.getElementById('player-loading').innerHTML = '<div class="loading-spinner"></div><div>正在加载离线缓存...</div>';
+    } catch (err) {
+        console.error('离线播放失败:', err);
+        showToast('离线播放失败: ' + err.message, 'error');
+    }
+}
+
+async function showOfflineList() {
+    const videos = await getAllOfflineVideos();
+    const modal = document.getElementById('modal');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalContent = document.getElementById('modalContent');
+    modalTitle.textContent = '离线缓存列表';
+    
+    if (videos.length === 0) {
+        modalContent.innerHTML = '<div style="text-align:center;padding:40px;color:#888;"><div style="font-size:40px;margin-bottom:12px;">📱</div><p>暂无离线缓存</p><p style="font-size:12px;margin-top:8px;">播放视频时点击"离线"按钮即可缓存</p></div>';
+        modal.classList.remove('hidden');
+        return;
+    }
+    
+    let html = '<div style="padding:16px;max-height:60vh;overflow-y:auto;">';
+    videos.forEach(video => {
+        const statusText = video.status === 'complete' ? '✅ 已缓存' : video.status === 'caching' ? `⬇ ${video.progress||0}%` : video.status === 'paused' ? `⏸ ${video.progress||0}%` : '❌ 失败';
+        const statusColor = video.status === 'complete' ? '#00ff88' : video.status === 'caching' ? '#00ccff' : video.status === 'paused' ? '#ffcc00' : '#ff3333';
+        const sizeText = video.blobSize ? formatBytes(video.blobSize) : '';
+        html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;margin-bottom:6px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;">`;
+        html += `<div style="flex:1;min-width:0;"><div style="font-size:13px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${video.title||'未知'}</div>`;
+        html += `<div style="font-size:11px;color:#888;margin-top:2px;">${video.episodeName} <span style="color:${statusColor};">${statusText}</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}</div></div>`;
+        html += `<div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;">`;
+        if (video.status === 'complete') html += `<button onclick="playOfflineById('${video.id}')" style="padding:4px 10px;background:rgba(0,255,136,0.2);border:1px solid rgba(0,255,136,0.3);border-radius:4px;color:#00ff88;font-size:11px;cursor:pointer;">播放</button>`;
+        html += `<button onclick="deleteOfflineVideo('${video.id}').then(()=>showOfflineList())" style="padding:4px 10px;background:rgba(255,80,80,0.2);border:1px solid rgba(255,80,80,0.3);border-radius:4px;color:#ff5050;font-size:11px;cursor:pointer;">删除</button>`;
+        html += `</div></div>`;
+    });
+    html += '</div>';
+    modalContent.innerHTML = html;
+    modal.classList.remove('hidden');
 }
 
 // =================================

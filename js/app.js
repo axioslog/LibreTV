@@ -658,12 +658,11 @@ async function search() {
 
         // 对搜索结果进行排序：按名称优先，名称相同时按接口源排序
         allResults.sort((a, b) => {
-            // 首先按照视频名称排序
+            const speedA = a.source_speed || 99999;
+            const speedB = b.source_speed || 99999;
             const nameCompare = (a.vod_name || '').localeCompare(b.vod_name || '');
             if (nameCompare !== 0) return nameCompare;
-            
-            // 如果名称相同，则按照来源排序
-            return (a.source_name || '').localeCompare(b.source_name || '');
+            return speedA - speedB;
         });
 
         // 更新搜索结果计数
@@ -735,6 +734,17 @@ async function search() {
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;');
+            const sourceSpeed = item.source_speed;
+            let speedTag = '';
+            if (sourceSpeed !== undefined && sourceSpeed !== null) {
+                if (sourceSpeed < 500) {
+                    speedTag = `<span style="font-size:11px;padding:1px 6px;border-radius:10px;background:rgba(0,255,136,0.15);color:#00ff88;border:1px solid rgba(0,255,136,0.3);">⚡${sourceSpeed}ms</span>`;
+                } else if (sourceSpeed < 1500) {
+                    speedTag = `<span style="font-size:11px;padding:1px 6px;border-radius:10px;background:rgba(255,204,0,0.15);color:#ffcc00;border:1px solid rgba(255,204,0,0.3);">${sourceSpeed}ms</span>`;
+                } else {
+                    speedTag = `<span style="font-size:11px;padding:1px 6px;border-radius:10px;background:rgba(255,80,80,0.15);color:#ff5050;border:1px solid rgba(255,80,80,0.3);">${sourceSpeed}ms</span>`;
+                }
+            }
             const sourceInfo = item.source_name ?
                 `<span class="bg-[#222] text-xs px-1.5 py-0.5 rounded-full">${item.source_name}</span>` : '';
             const sourceCode = item.source_code || '';
@@ -779,7 +789,7 @@ async function search() {
                             </div>
                             
                             <div class="flex justify-between items-center mt-1 pt-1 border-t border-gray-800">
-                                ${sourceInfo ? `<div>${sourceInfo}</div>` : '<div></div>'}
+                                ${sourceInfo ? `<div class="flex items-center gap-1">${sourceInfo}${speedTag}</div>` : `<div>${speedTag}</div>`}
                                 <!-- 接口名称过长会被挤变形
                                 <div>
                                     <span class="text-gray-500 flex items-center hover:text-blue-400 transition-colors">

@@ -973,3 +973,146 @@ function showImportBox(fun) {
         fun(fileInput.files[0]);
     });
 }
+
+let _offlineDB = null;
+function _openOfflineDB() {
+    return new Promise((resolve, reject) => {
+        if (_offlineDB) { resolve(_offlineDB); return; }
+        const request = indexedDB.open('LibreTVOffline', 4);
+        request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('segments')) db.createObjectStore('segments', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs', { keyPath: 'id' });
+        };
+        request.onsuccess = (e) => { _offlineDB = e.target.result; resolve(_offlineDB); };
+        request.onerror = (e) => reject(e.target.error);
+    });
+}
+
+async function _getAllOfflineVideos() {
+    const db = await _openOfflineDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('videos', 'readonly');
+        const req = tx.objectStore('videos').getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function _deleteOfflineVideo(id) {
+    const db = await _openOfflineDB();
+    const video = await new Promise((resolve, reject) => {
+        const tx = db.transaction('videos', 'readonly');
+        const req = tx.objectStore('videos').get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    const segmentCount = video?.segmentCount || 0;
+    const keyCount = video?.keyCount || 0;
+    return new Promise((resolve, reject) => {
+        const storeNames = ['videos', 'segments', 'blobs'];
+        const tx = db.transaction(storeNames, 'readwrite');
+        tx.objectStore('videos').delete(id);
+        tx.objectStore('blobs').delete(id);
+        for (let i = 0; i < segmentCount; i++) {
+            tx.objectStore('segments').delete(id + '_' + i);
+        }
+        for (let i = 0; i < keyCount; i++) {
+            tx.objectStore('segments').delete(id + '_key_' + i);
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function showIndexOfflineList() {
+    let videos = [];
+    try {
+        videos = await _getAllOfflineVideos();
+    } catch (e) {
+        showToast('无法读取离线缓存', 'error');
+        return;
+    }
+    
+    let modal = document.getElementById('indexOfflineModal');
+    if (modal) document.body.removeChild(modal);
+    
+    modal = document.createElement('div');
+    modal.id = 'indexOfflineModal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-40';
+    
+    let html = '<div class="bg-[#191919] rounded-lg p-6 max-w-md w-full max-h-[80vh] overflow-y-auto relative">';
+    html += '<button onclick="document.body.removeChild(document.getElementById(\'indexOfflineModal\'))" class="absolute top-4 right-4 text-gray-400 hover:text-white text-xl">&times;</button>';
+    html += '<h3 class="text-xl font-bold text-white mb-4">📱 离线缓存</h3>';
+    
+    if (videos.length === 0) {
+        html += '<div style="text-align:center;padding:30px;color:#888;">';
+        html += '<div style="font-size:36px;margin-bottom:8px;">📭</div>';
+        html += '<p>暂无离线缓存</p>';
+        html += '<p style="font-size:12px;margin-top:6px;">播放视频时点击"离线"按钮即可缓存</p>';
+        html += '</div>';
+    } else {
+        videos.forEach(video => {
+            const statusText = video.status === 'complete' ? '✅ 已缓存' : 
+                              video.status === 'caching' ? `⬇ ${video.progress || 0}%` :
+                              video.status === 'paused' ? `⏸ ${video.progress || 0}%` : '❌ 失败';
+            const statusColor = video.status === 'complete' ? '#00ff88' : 
+                               video.status === 'caching' ? '#00ccff' :
+                               video.status === 'paused' ? '#ffcc00' : '#ff3333';
+            
+            html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;margin-bottom:6px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;">`;
+            html += `<div style="flex:1;min-width:0;">`;
+            html += `<div style="font-size:13px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${video.title || '未知视频'}</div>`;
+            html += `<div style="font-size:11px;color:#888;margin-top:2px;">${video.episodeName} <span style="color:${statusColor};">${statusText}</span></div>`;
+            html += `</div>`;
+            html += `<div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;">`;
+            if (video.status === 'complete') {
+                html += `<button onclick="playFromOfflineList('${video.id}')" style="padding:4px 10px;background:rgba(0,255,136,0.2);border:1px solid rgba(0,255,136,0.3);border-radius:4px;color:#00ff88;font-size:11px;cursor:pointer;">播放</button>`;
+            }
+            html += `<button onclick="deleteFromOfflineList('${video.id}')" style="padding:4px 10px;background:rgba(255,80,80,0.2);border:1px solid rgba(255,80,80,0.3);border-radius:4px;color:#ff5050;font-size:11px;cursor:pointer;">删除</button>`;
+            html += `</div></div>`;
+        });
+    }
+    
+    html += '</div>';
+    modal.innerHTML = html;
+    document.body.appendChild(modal);
+    
+    modal.addEventListener('click', function (e) {
+        if (e.target === modal) document.body.removeChild(modal);
+    });
+}
+
+async function deleteFromOfflineList(id) {
+    try {
+        await _deleteOfflineVideo(id);
+        showToast('已删除', 'success');
+        showIndexOfflineList();
+    } catch (e) {
+        showToast('删除失败', 'error');
+    }
+}
+
+async function playFromOfflineList(id) {
+    const db = await _openOfflineDB();
+    const video = await new Promise((resolve, reject) => {
+        const tx = db.transaction('videos', 'readonly');
+        const req = tx.objectStore('videos').get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    
+    if (!video || video.status !== 'complete') {
+        showToast('缓存数据不完整', 'error');
+        return;
+    }
+    
+    const params = new URLSearchParams({
+        offline: 'true',
+        id: id,
+        title: video.title || '',
+        ep: video.episodeName || ''
+    });
+    window.location.href = 'player.html?' + params.toString();
+}
