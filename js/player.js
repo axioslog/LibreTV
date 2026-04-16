@@ -124,12 +124,29 @@ function initializePageContent() {
     if (offlineMode === 'true') {
         const offlineId = urlParams.get('id');
         const offlineTitle = urlParams.get('title') || '离线视频';
+        const action = urlParams.get('action');
         if (offlineId) {
             currentVideoTitle = offlineTitle;
             document.getElementById('videoTitle').textContent = offlineTitle;
             document.title = offlineTitle + ' - LibreTV播放器';
-            waitForServiceWorker().then(() => {
-                playOfflineById(offlineId);
+            waitForServiceWorker().then(async () => {
+                if (action === 'resume') {
+                    const video = await getOfflineVideo(offlineId);
+                    if (video && video.m3u8Url) {
+                        startEpisodeCache(offlineId, video.episodeIndex || 0, video.m3u8Url, video.episodeName || '', video.progress || 1);
+                    } else {
+                        playOfflineById(offlineId);
+                    }
+                } else if (action === 'retry') {
+                    const video = await getOfflineVideo(offlineId);
+                    if (video && video.m3u8Url) {
+                        startEpisodeCache(offlineId, video.episodeIndex || 0, video.m3u8Url, video.episodeName || '', 1);
+                    } else {
+                        playOfflineById(offlineId);
+                    }
+                } else {
+                    playOfflineById(offlineId);
+                }
             });
             return;
         }
@@ -2060,8 +2077,8 @@ function showOfflineModal() {
     
     let html = '<div style="padding:12px;max-height:75vh;overflow-y:auto;min-width:420px;">';
     html += '<div style="display:flex;gap:8px;margin-bottom:14px;">';
-    html += '<button onclick="cacheCurrentEpisode()" style="flex:1;padding:10px 0;background:linear-gradient(135deg,#00ff88,#00cc66);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">⬇ 缓存本集</button>';
     html += '<button onclick="cacheAllEpisodes()" style="flex:1;padding:10px 0;background:linear-gradient(135deg,#00ccff,#0088ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">⬇ 全部缓存</button>';
+    html += '<button onclick="window.open(\'offline.html\',\'_blank\')" style="flex:1;padding:10px 0;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:#ccc;font-size:13px;font-weight:600;cursor:pointer;">📋 管理缓存</button>';
     html += '</div>';
     
     html += '<div id="offlineEpisodeList">';
@@ -2186,6 +2203,7 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName, re
             m3u8Url,
             episodeName,
             title: currentVideoTitle,
+            sourceCode: currentSourceCode || '',
             status: 'caching',
             progress: 0,
             timestamp: Date.now()

@@ -3,6 +3,7 @@ const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/player.html',
+    '/offline.html',
     '/watch.html',
     '/css/styles.css',
     '/css/index.css',
