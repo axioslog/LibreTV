@@ -2842,74 +2842,132 @@ function getSpeedTagHtml(sourceKey) {
 // =================================
 // ========== 投屏功能 ==========
 // =================================
+let castSession = null;
+let dlnaDeviceScanTimer = null;
+
 function showCastModal() {
     const modal = document.getElementById('modal');
     const modalTitle = document.getElementById('modalTitle');
     const modalContent = document.getElementById('modalContent');
-
-    modalTitle.textContent = '投屏播放';
+    modalTitle.textContent = '投屏';
     
     const hasAirPlay = !!window.WebKitPlaybackTargetAvailabilityEvent;
-    const hasRemotePlayback = !!navigator.remotePlayback;
+    const hasRemotePlayback = !!(navigator.remotePlayback);
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const isAndroid = /Android/i.test(navigator.userAgent);
     
-    let html = '<div class="cast-modal-content" style="padding:16px;">';
+    let html = '<div style="padding:12px;max-height:70vh;overflow-y:auto;">';
     
-    html += '<div class="cast-section" style="margin-bottom:20px;">';
-    html += '<h3 style="color:#00ccff;font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">';
-    html += '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#00ccff" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>';
-    html += '无线投屏</h3>';
+    html += '<div style="text-align:center;margin-bottom:16px;">';
+    html += '<div style="width:64px;height:64px;margin:0 auto 10px;background:rgba(0,204,255,0.1);border-radius:50%;display:flex;align-items:center;justify-content:center;">';
+    html += '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#00ccff" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M5 12.55a11 11 0 0114 0" stroke-dasharray="2 2"/><path d="M8.53 16.11a6 6 0 016.95 0" stroke-dasharray="2 2"/></svg>';
+    html += '</div>';
+    html += '<div style="font-size:14px;color:#ccc;">选择投屏方式</div>';
+    html += '</div>';
+    
+    html += '<div id="castDeviceList" style="margin-bottom:16px;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 0;color:#888;font-size:12px;">';
+    html += '<div style="width:6px;height:6px;border-radius:50%;background:#00ccff;animation:pulse 1.5s infinite;"></div>';
+    html += '<span>正在搜索同一网络下的设备...</span>';
+    html += '</div>';
+    html += '</div>';
+    
+    html += '<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:12px;margin-bottom:12px;">';
+    html += '<div style="font-size:12px;color:#666;margin-bottom:10px;">快捷投屏</div>';
     
     if (hasAirPlay || hasRemotePlayback) {
-        html += '<button onclick="startAirPlay()" style="width:100%;padding:12px;margin-bottom:8px;background:linear-gradient(135deg,#00ccff,#0088ff);border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">';
-        html += '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M5 12.55a11 11 0 0114 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>';
-        html += 'AirPlay 投屏';
-        html += '</button>';
-        html += '<p style="font-size:11px;color:#888;text-align:center;">适用于 Apple TV、智能电视等支持 AirPlay 的设备</p>';
-    } else {
-        html += '<div style="padding:12px;background:rgba(255,200,0,0.1);border:1px solid rgba(255,200,0,0.3);border-radius:8px;text-align:center;">';
-        html += '<p style="font-size:12px;color:#ffcc00;">当前浏览器不支持 AirPlay</p>';
-        html += '<p style="font-size:11px;color:#888;margin-top:4px;">请在 Safari 浏览器中使用</p>';
+        html += '<button onclick="startAirPlay()" style="width:100%;padding:12px;margin-bottom:8px;background:rgba(0,204,255,0.08);border:1px solid rgba(0,204,255,0.2);border-radius:10px;color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:10px;">';
+        html += '<div style="width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,#00ccff,#0088ff);display:flex;align-items:center;justify-content:center;flex-shrink:0;">';
+        html += '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M5 12.55a11 11 0 0114 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>';
         html += '</div>';
+        html += '<div style="text-align:left;"><div style="font-weight:600;">AirPlay 投屏</div><div style="font-size:11px;color:#888;margin-top:2px;">Apple TV / 智能电视</div></div>';
+        html += '</button>';
     }
-    html += '</div>';
     
-    html += '<div class="cast-section" style="margin-bottom:20px;">';
-    html += '<h3 style="color:#00ccff;font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">';
-    html += '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#00ccff" stroke-width="2"><path d="M6 2l-4 8h4l-2 8 8-10h-4l4-6z"/></svg>';
-    html += 'Chromecast 投屏</h3>';
-    html += '<button onclick="startChromecast()" style="width:100%;padding:12px;margin-bottom:8px;background:linear-gradient(135deg,#4285f4,#34a853);border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">';
-    html += '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M5 12.55a11 11 0 0114 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>';
-    html += 'Chromecast 投屏';
+    html += '<button onclick="startChromecast()" style="width:100%;padding:12px;margin-bottom:8px;background:rgba(66,133,244,0.08);border:1px solid rgba(66,133,244,0.2);border-radius:10px;color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:10px;">';
+    html += '<div style="width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,#4285f4,#34a853);display:flex;align-items:center;justify-content:center;flex-shrink:0;">';
+    html += '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M5 12.55a11 11 0 0114 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>';
+    html += '</div>';
+    html += '<div style="text-align:left;"><div style="font-weight:600;">Chromecast 投屏</div><div style="font-size:11px;color:#888;margin-top:2px;">Chromecast / Google TV</div></div>';
     html += '</button>';
-    html += '<p style="font-size:11px;color:#888;text-align:center;">适用于 Chromecast、Google TV 等设备</p>';
-    html += '</div>';
     
-    html += '<div class="cast-section" style="margin-bottom:20px;">';
-    html += '<h3 style="color:#00ccff;font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">';
-    html += '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#00ccff" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
-    html += 'DLNA 投屏</h3>';
-    html += '<button onclick="startDLNA()" style="width:100%;padding:12px;margin-bottom:8px;background:linear-gradient(135deg,#ff6b6b,#ee5a24);border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">';
-    html += '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M5 12.55a11 11 0 0114 0M8.53 16.11a6 6 0 016.95 0M12 20h.01"/></svg>';
-    html += 'DLNA 投屏';
+    html += '<button onclick="startDLNA()" style="width:100%;padding:12px;margin-bottom:8px;background:rgba(255,107,107,0.08);border:1px solid rgba(255,107,107,0.2);border-radius:10px;color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:10px;">';
+    html += '<div style="width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,#ff6b6b,#ee5a24);display:flex;align-items:center;justify-content:center;flex-shrink:0;">';
+    html += '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
+    html += '</div>';
+    html += '<div style="text-align:left;"><div style="font-weight:600;">DLNA / 局域网投屏</div><div style="font-size:11px;color:#888;margin-top:2px;">乐播投屏 / 智能电视 / 机顶盒</div></div>';
     html += '</button>';
-    html += '<p style="font-size:11px;color:#888;text-align:center;">适用于支持 DLNA 的智能电视和机顶盒</p>';
+    
     html += '</div>';
     
-    html += '<div class="cast-section" style="margin-bottom:8px;">';
-    html += '<h3 style="color:#00ccff;font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">';
-    html += '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#00ccff" stroke-width="2"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>';
-    html += '复制播放地址</h3>';
-    html += '<button onclick="copyVideoUrl()" style="width:100%;padding:12px;margin-bottom:8px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:8px;color:#fff;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">';
-    html += '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
-    html += '复制视频地址到剪贴板';
+    html += '<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:12px;">';
+    html += '<button onclick="copyVideoUrl()" style="width:100%;padding:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:#aaa;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">';
+    html += '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+    html += '复制视频地址';
     html += '</button>';
-    html += '<p style="font-size:11px;color:#888;text-align:center;">可粘贴到其他播放器或投屏APP中使用</p>';
     html += '</div>';
     
     html += '</div>';
-    
     modalContent.innerHTML = html;
     modal.classList.remove('hidden');
+    
+    scanCastDevices();
+}
+
+async function scanCastDevices() {
+    const deviceList = document.getElementById('castDeviceList');
+    if (!deviceList) return;
+    
+    let devices = [];
+    
+    try {
+        if (navigator.remotePlayback && navigator.remotePlayback.watchAvailability) {
+            navigator.remotePlayback.watchAvailability(async (available) => {
+                if (available) {
+                    devices.push({ name: 'Remote Playback 设备', type: 'remote', available: true });
+                }
+                renderDeviceList(devices);
+            });
+        }
+    } catch (e) {}
+    
+    try {
+        if (window.chrome && chrome.cast && chrome.cast.isAvailable) {
+            devices.push({ name: 'Chromecast', type: 'chromecast', available: true });
+        }
+    } catch (e) {}
+    
+    if (window.WebKitPlaybackTargetAvailabilityEvent) {
+        devices.push({ name: 'AirPlay 设备', type: 'airplay', available: true });
+    }
+    
+    setTimeout(() => {
+        if (devices.length === 0) {
+            deviceList.innerHTML = '<div style="padding:12px;text-align:center;">' +
+                '<div style="font-size:12px;color:#888;margin-bottom:8px;">未发现同一网络下的设备</div>' +
+                '<div style="font-size:11px;color:#666;">请确保手机和电视连接同一WiFi，或使用下方投屏方式</div>' +
+                '</div>';
+        } else {
+            renderDeviceList(devices);
+        }
+    }, 2000);
+}
+
+function renderDeviceList(devices) {
+    const deviceList = document.getElementById('castDeviceList');
+    if (!deviceList) return;
+    
+    let html = '<div style="font-size:12px;color:#666;margin-bottom:8px;">发现的设备</div>';
+    devices.forEach(device => {
+        const icon = device.type === 'airplay' ? '📺' : device.type === 'chromecast' ? '📡' : '📶';
+        const action = device.type === 'airplay' ? 'startAirPlay()' : device.type === 'chromecast' ? 'startChromecast()' : 'startRemotePlayback()';
+        html += `<button onclick="${action}" style="width:100%;padding:10px;margin-bottom:6px;background:rgba(0,255,136,0.06);border:1px solid rgba(0,255,136,0.15);border-radius:8px;color:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:10px;">`;
+        html += `<span style="font-size:18px;">${icon}</span>`;
+        html += `<div style="flex:1;text-align:left;"><div style="font-weight:500;">${device.name}</div><div style="font-size:11px;color:#00ff88;">可连接</div></div>`;
+        html += '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#00ff88" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>';
+        html += '</button>';
+    });
+    deviceList.innerHTML = html;
 }
 
 function startAirPlay() {
@@ -2917,7 +2975,6 @@ function startAirPlay() {
         showToast('请先播放视频', 'error');
         return;
     }
-    
     const video = art.video;
     if (video.webkitShowPlaybackTargetPicker) {
         video.webkitShowPlaybackTargetPicker();
@@ -2930,20 +2987,24 @@ function startAirPlay() {
     }
 }
 
-let castSession = null;
+function startRemotePlayback() {
+    if (!art || !art.video) return;
+    if (art.video.remote && art.video.remote.prompt) {
+        art.video.remote.prompt();
+        showToast('正在连接设备...', 'info');
+    }
+}
 
 function startChromecast() {
     if (!art || !art.video) {
         showToast('请先播放视频', 'error');
         return;
     }
-    
     if (!window.chrome || !chrome.cast) {
         showToast('Chromecast 需要 Chrome 浏览器支持，正在尝试加载...', 'info');
         loadChromecastSDK();
         return;
     }
-    
     chrome.cast.requestSession(function(session) {
         castSession = session;
         const mediaInfo = new chrome.cast.media.MediaInfo(currentVideoUrl, 'application/x-mpegurl');
@@ -2993,56 +3054,83 @@ function initializeCastApi() {
 }
 
 function startDLNA() {
-    if (!art || !art.video) {
-        showToast('请先播放视频', 'error');
+    if (!currentVideoUrl) {
+        showToast('没有可播放的视频地址', 'error');
         return;
     }
     
-    const videoUrl = currentVideoUrl;
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
     
     const modal = document.getElementById('modal');
     const modalTitle = document.getElementById('modalTitle');
     const modalContent = document.getElementById('modalContent');
+    modalTitle.textContent = 'DLNA / 局域网投屏';
     
-    modalTitle.textContent = 'DLNA 投屏';
+    let html = '<div style="padding:12px;max-height:70vh;overflow-y:auto;">';
     
-    let html = '<div style="padding:16px;">';
-    html += '<div style="background:rgba(0,204,255,0.1);border:1px solid rgba(0,204,255,0.3);border-radius:8px;padding:16px;margin-bottom:16px;">';
-    html += '<p style="font-size:13px;color:#00ccff;margin-bottom:8px;">📱 DLNA 投屏方法：</p>';
-    html += '<ol style="font-size:12px;color:#ccc;line-height:1.8;padding-left:16px;">';
-    html += '<li>确保手机和电视在同一 WiFi 网络下</li>';
-    html += '<li>复制下方视频地址</li>';
-    html += '<li>打开手机上的投屏APP（如：乐播投屏、投屏大师、BubbleUPnP等）</li>';
-    html += '<li>在投屏APP中粘贴视频地址进行播放</li>';
-    html += '</ol>';
+    html += '<div style="background:rgba(0,204,255,0.06);border:1px solid rgba(0,204,255,0.15);border-radius:10px;padding:14px;margin-bottom:14px;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">';
+    html += '<div style="width:28px;height:28px;border-radius:6px;background:rgba(0,204,255,0.15);display:flex;align-items:center;justify-content:center;">📱</div>';
+    html += '<span style="font-size:13px;color:#00ccff;font-weight:600;">投屏步骤</span>';
     html += '</div>';
+    html += '<div style="font-size:12px;color:#ccc;line-height:2;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;"><span style="width:20px;height:20px;border-radius:50%;background:rgba(0,204,255,0.2);display:flex;align-items:center;justify-content:center;font-size:10px;color:#00ccff;flex-shrink:0;">1</span>确保手机和电视连接同一WiFi</div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;"><span style="width:20px;height:20px;border-radius:50%;background:rgba(0,204,255,0.2);display:flex;align-items:center;justify-content:center;font-size:10px;color:#00ccff;flex-shrink:0;">2</span>电视上打开乐播投屏 / 接收投屏APP</div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;"><span style="width:20px;height:20px;border-radius:50%;background:rgba(0,204,255,0.2);display:flex;align-items:center;justify-content:center;font-size:10px;color:#00ccff;flex-shrink:0;">3</span>点击下方按钮复制视频地址</div>';
+    html += '<div style="display:flex;align-items:center;gap:8px;"><span style="width:20px;height:20px;border-radius:50%;background:rgba(0,204,255,0.2);display:flex;align-items:center;justify-content:center;font-size:10px;color:#00ccff;flex-shrink:0;">4</span>在投屏APP中粘贴地址并播放</div>';
+    html += '</div></div>';
     
-    html += '<div style="margin-bottom:16px;">';
-    html += '<label style="font-size:12px;color:#888;display:block;margin-bottom:6px;">视频播放地址：</label>';
+    html += '<div style="margin-bottom:14px;">';
+    html += '<div style="font-size:12px;color:#888;margin-bottom:6px;">视频地址</div>';
     html += '<div style="display:flex;gap:8px;">';
-    html += `<input type="text" value="${videoUrl}" readonly style="flex:1;padding:8px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:#fff;font-size:12px;font-family:monospace;" id="dlnaVideoUrl">`;
-    html += '<button onclick="copyDLNAUrl()" style="padding:8px 16px;background:linear-gradient(135deg,#ff6b6b,#ee5a24);border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">复制地址</button>';
-    html += '</div>';
-    html += '</div>';
+    html += `<input type="text" value="${currentVideoUrl}" readonly style="flex:1;padding:10px 12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:#fff;font-size:11px;font-family:monospace;" id="dlnaVideoUrl">`;
+    html += '<button onclick="copyDLNAUrl()" style="padding:10px 16px;background:linear-gradient(135deg,#ff6b6b,#ee5a24);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">复制</button>';
+    html += '</div></div>';
     
-    html += '<div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:12px;">';
-    html += '<p style="font-size:11px;color:#888;">💡 提示：部分智能电视支持直接在电视浏览器中打开视频地址播放</p>';
-    html += '</div>';
+    if (isAndroid) {
+        html += '<div style="margin-bottom:14px;">';
+        html += '<div style="font-size:12px;color:#888;margin-bottom:8px;">一键打开投屏APP</div>';
+        html += '<div style="display:flex;gap:8px;">';
+        html += '<button onclick="openCastApp(\'lebo\')" style="flex:1;padding:10px;background:rgba(0,204,255,0.08);border:1px solid rgba(0,204,255,0.2);border-radius:8px;color:#fff;font-size:12px;cursor:pointer;">乐播投屏</button>';
+        html += '<button onclick="openCastApp(\'escreen\')" style="flex:1;padding:10px;background:rgba(0,204,255,0.08);border:1px solid rgba(0,204,255,0.2);border-radius:8px;color:#fff;font-size:12px;cursor:pointer;">易投屏</button>';
+        html += '<button onclick="openCastApp(\'bubbleupnp\')" style="flex:1;padding:10px;background:rgba(0,204,255,0.08);border:1px solid rgba(0,204,255,0.2);border-radius:8px;color:#fff;font-size:12px;cursor:pointer;">BubbleUPnP</button>';
+        html += '</div></div>';
+    }
+    
+    html += '<div style="background:rgba(255,255,255,0.03);border-radius:8px;padding:12px;">';
+    html += '<div style="font-size:11px;color:#666;line-height:1.6;">';
+    html += '💡 <b style="color:#888;">提示：</b>部分智能电视支持直接在电视浏览器中打开视频地址播放。也可以将视频地址发送到微信/QQ，然后在电视端微信/QQ中打开。';
+    html += '</div></div>';
     
     html += '</div>';
-    
     modalContent.innerHTML = html;
+}
+
+function openCastApp(app) {
+    const schemes = {
+        'lebo': 'lebo://',
+        'escreen': 'escreen://',
+        'bubbleupnp': 'intent://#Intent;package=com.bubblesoft.android.bubbleupnp;end'
+    };
+    const url = schemes[app];
+    if (url) {
+        window.location.href = url;
+        setTimeout(() => {
+            showToast('如果未打开APP，请手动打开投屏APP并粘贴视频地址', 'info');
+        }, 1500);
+    }
 }
 
 function copyDLNAUrl() {
     const input = document.getElementById('dlnaVideoUrl');
     if (input) {
         navigator.clipboard.writeText(input.value).then(() => {
-            showToast('视频地址已复制', 'success');
+            showToast('视频地址已复制，请打开投屏APP粘贴', 'success');
         }).catch(() => {
             input.select();
             document.execCommand('copy');
-            showToast('视频地址已复制', 'success');
+            showToast('视频地址已复制，请打开投屏APP粘贴', 'success');
         });
     }
 }
