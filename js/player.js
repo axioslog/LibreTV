@@ -542,7 +542,7 @@ function initPlayer(videoUrl, options = {}) {
         backdrop: true,
         playsInline: true,
         autoPlayback: false,
-        airplay: true,
+        airplay: false,
         hotkey: false,
         theme: '#23ade5',
         lang: navigator.language.toLowerCase(),
@@ -1936,22 +1936,30 @@ function waitForServiceWorker() {
 
 function openOfflineDB() {
     return new Promise((resolve, reject) => {
-        if (offlineDB) { resolve(offlineDB); return; }
-        const request = indexedDB.open('LibreTVOffline', 4);
+        if (offlineDB && !offlineDB.closed) { resolve(offlineDB); return; }
+        offlineDB = null;
+        const request = indexedDB.open('LibreTVOffline', 5);
         request.onupgradeneeded = (e) => {
             const db = e.target.result;
+            if (db.objectStoreNames.contains('segments')) {
+                db.deleteObjectStore('segments');
+            }
             if (!db.objectStoreNames.contains('videos')) {
                 db.createObjectStore('videos', { keyPath: 'id' });
             }
-            if (!db.objectStoreNames.contains('segments')) {
-                db.createObjectStore('segments', { keyPath: 'id' });
-            }
+            db.createObjectStore('segments', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('blobs')) {
                 db.createObjectStore('blobs', { keyPath: 'id' });
             }
         };
-        request.onsuccess = (e) => { offlineDB = e.target.result; resolve(offlineDB); };
-        request.onerror = (e) => reject(e.target.error);
+        request.onsuccess = (e) => {
+            offlineDB = e.target.result;
+            offlineDB.onclose = () => { offlineDB = null; };
+            offlineDB.onversionchange = () => { offlineDB.close(); offlineDB = null; };
+            resolve(offlineDB);
+        };
+        request.onerror = (e) => { offlineDB = null; reject(e.target.error); };
+        request.onblocked = () => { offlineDB = null; reject(new Error('数据库被占用，请关闭其他标签页后刷新')); };
     });
 }
 
@@ -2052,37 +2060,39 @@ function showOfflineModal() {
     const episodes = currentEpisodes || [];
     const currentIndex = currentEpisodeIndex || 0;
     
-    let html = '<div style="padding:16px;max-height:60vh;overflow-y:auto;">';
-    html += '<div style="margin-bottom:16px;display:flex;gap:8px;">';
-    html += '<button onclick="playAndCache()" style="flex:1;padding:10px;background:linear-gradient(135deg,#ff9900,#ff6600);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">▶ 边播边缓存</button>';
-    html += '<button onclick="cacheAllEpisodes()" style="flex:1;padding:10px;background:linear-gradient(135deg,#00ccff,#0088ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">缓存全部 (' + episodes.length + '集)</button>';
-    html += '<button onclick="cacheCurrentEpisode()" style="flex:1;padding:10px;background:linear-gradient(135deg,#00ff88,#00cc66);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">缓存当前集</button>';
+    let html = '<div style="padding:12px;max-height:70vh;overflow-y:auto;">';
+    html += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
+    html += '<button onclick="playAndCache()" style="flex:1;padding:10px 0;background:linear-gradient(135deg,#ff9900,#ff6600);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">▶ 边播边缓存</button>';
+    html += '<button onclick="cacheCurrentEpisode()" style="flex:1;padding:10px 0;background:linear-gradient(135deg,#00ff88,#00cc66);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">⬇ 缓存本集</button>';
+    html += '<button onclick="cacheAllEpisodes()" style="flex:1;padding:10px 0;background:linear-gradient(135deg,#00ccff,#0088ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">⬇ 全部缓存</button>';
     html += '</div>';
-    html += '<div style="margin-bottom:12px;font-size:12px;color:#888;">缓存后可离线播放，支持断点续传</div>';
+    
     html += '<div id="offlineEpisodeList">';
     episodes.forEach((ep, index) => {
         const epName = getOfflineEpisodeName(ep, index);
         const isCurrent = index === currentIndex;
-        html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;margin-bottom:6px;background:${isCurrent ? 'rgba(0,204,255,0.08)' : 'rgba(255,255,255,0.03)'};border:1px solid ${isCurrent ? 'rgba(0,204,255,0.25)' : 'rgba(255,255,255,0.06)'};border-radius:8px;" id="offline-ep-${index}">`;
-        html += `<div style="flex:1;min-width:0;">`;
+        html += `<div id="offline-ep-${index}" style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);${isCurrent ? 'background:rgba(0,204,255,0.05);margin:0 -12px;padding:10px 12px;border-radius:6px;' : ''}">`;
+        html += `<div style="width:32px;height:32px;border-radius:6px;background:${isCurrent ? 'rgba(0,204,255,0.2)' : 'rgba(255,255,255,0.06)'};display:flex;align-items:center;justify-content:center;font-size:12px;color:${isCurrent ? '#00ccff' : '#888'};font-weight:600;flex-shrink:0;">${index + 1}</div>`;
+        html += `<div style="flex:1;min-width:0;margin-left:10px;">`;
         html += `<div style="font-size:13px;color:${isCurrent ? '#00ccff' : '#eee'};font-weight:${isCurrent ? '600' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${isCurrent ? '▶ ' : ''}${epName}</div>`;
-        html += `<div style="font-size:11px;color:#888;margin-top:2px;" id="offline-status-${index}"></div>`;
+        html += `<div id="offline-status-${index}" style="font-size:11px;color:#666;margin-top:2px;"></div>`;
         html += `</div>`;
-        html += `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:8px;" id="offline-actions-${index}">`;
-        html += `<button onclick="cacheEpisode(${index})" style="padding:5px 12px;background:rgba(0,204,255,0.15);border:1px solid rgba(0,204,255,0.3);border-radius:6px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;" id="offline-btn-${index}">缓存</button>`;
+        html += `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:8px;">`;
+        html += `<button id="offline-btn-${index}" onclick="cacheEpisode(${index})" style="padding:5px 14px;background:rgba(0,204,255,0.12);border:1px solid rgba(0,204,255,0.25);border-radius:14px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;">缓存</button>`;
         html += `</div></div>`;
     });
     html += '</div>';
+    
     html += '<div id="offlineProgressArea" style="margin-top:12px;display:none;">';
-    html += '<div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:12px;">';
-    html += '<div style="display:flex;justify-content:space-between;margin-bottom:6px;">';
-    html += '<span id="offlineProgressLabel" style="font-size:12px;color:#ccc;">准备缓存...</span>';
-    html += '<span id="offlineProgressPercent" style="font-size:12px;color:#00ccff;">0%</span>';
+    html += '<div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:14px;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+    html += '<span id="offlineProgressLabel" style="font-size:13px;color:#ccc;font-weight:500;">准备缓存...</span>';
+    html += '<span id="offlineProgressPercent" style="font-size:13px;color:#00ccff;font-weight:600;">0%</span>';
     html += '</div>';
-    html += '<div style="background:rgba(255,255,255,0.1);border-radius:4px;height:6px;overflow:hidden;">';
+    html += '<div style="background:rgba(255,255,255,0.08);border-radius:4px;height:4px;overflow:hidden;">';
     html += '<div id="offlineProgressBar" style="height:100%;background:linear-gradient(90deg,#00ccff,#00ff88);width:0%;transition:width 0.3s;border-radius:4px;"></div>';
     html += '</div>';
-    html += '<div style="display:flex;justify-content:space-between;margin-top:6px;">';
+    html += '<div style="display:flex;justify-content:space-between;margin-top:8px;">';
     html += '<span id="offlineSpeedLabel" style="font-size:11px;color:#888;"></span>';
     html += '<span id="offlineSizeLabel" style="font-size:11px;color:#888;"></span>';
     html += '</div></div></div>';

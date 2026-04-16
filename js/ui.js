@@ -977,16 +977,24 @@ function showImportBox(fun) {
 let _offlineDB = null;
 function _openOfflineDB() {
     return new Promise((resolve, reject) => {
-        if (_offlineDB) { resolve(_offlineDB); return; }
-        const request = indexedDB.open('LibreTVOffline', 4);
+        if (_offlineDB && !_offlineDB.closed) { resolve(_offlineDB); return; }
+        _offlineDB = null;
+        const request = indexedDB.open('LibreTVOffline', 5);
         request.onupgradeneeded = (e) => {
             const db = e.target.result;
+            if (db.objectStoreNames.contains('segments')) db.deleteObjectStore('segments');
             if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath: 'id' });
-            if (!db.objectStoreNames.contains('segments')) db.createObjectStore('segments', { keyPath: 'id' });
+            db.createObjectStore('segments', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs', { keyPath: 'id' });
         };
-        request.onsuccess = (e) => { _offlineDB = e.target.result; resolve(_offlineDB); };
-        request.onerror = (e) => reject(e.target.error);
+        request.onsuccess = (e) => {
+            _offlineDB = e.target.result;
+            _offlineDB.onclose = () => { _offlineDB = null; };
+            _offlineDB.onversionchange = () => { _offlineDB.close(); _offlineDB = null; };
+            resolve(_offlineDB);
+        };
+        request.onerror = (e) => { _offlineDB = null; reject(e.target.error); };
+        request.onblocked = () => { _offlineDB = null; reject(new Error('数据库被占用')); };
     });
 }
 

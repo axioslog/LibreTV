@@ -54,11 +54,12 @@ self.addEventListener('activate', event => {
 
 function swOpenDB() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open('LibreTVOffline', 4);
+        const request = indexedDB.open('LibreTVOffline', 5);
         request.onupgradeneeded = (e) => {
             const db = e.target.result;
+            if (db.objectStoreNames.contains('segments')) db.deleteObjectStore('segments');
             if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath: 'id' });
-            if (!db.objectStoreNames.contains('segments')) db.createObjectStore('segments', { keyPath: 'id' });
+            db.createObjectStore('segments', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs', { keyPath: 'id' });
         };
         request.onsuccess = (e) => resolve(e.target.result);
