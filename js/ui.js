@@ -1050,7 +1050,7 @@ async function showIndexOfflineList() {
     modal.id = 'indexOfflineModal';
     modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-40';
     
-    let html = '<div class="bg-[#191919] rounded-lg p-6 max-w-md w-full max-h-[80vh] overflow-y-auto relative">';
+    let html = '<div class="bg-[#191919] rounded-lg p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto relative">';
     html += '<button onclick="document.body.removeChild(document.getElementById(\'indexOfflineModal\'))" class="absolute top-4 right-4 text-gray-400 hover:text-white text-xl">&times;</button>';
     html += '<h3 class="text-xl font-bold text-white mb-4">📱 离线缓存</h3>';
     
@@ -1062,29 +1062,42 @@ async function showIndexOfflineList() {
         html += '</div>';
     } else {
         videos.forEach(video => {
+            const progressText = (typeof video.progress === 'number') ? video.progress.toFixed(2) : '0.00';
+            const sizeText = video.blobSize ? _formatBytes(video.blobSize) : '';
             const statusText = video.status === 'complete' ? '✅ 已缓存' : 
-                              video.status === 'caching' ? `⬇ ${video.progress || 0}%` :
-                              video.status === 'paused' ? `⏸ ${video.progress || 0}%` : '❌ 失败';
+                              video.status === 'caching' ? `⬇ ${progressText}%` :
+                              video.status === 'paused' ? `⏸ ${progressText}%` : '❌ 失败';
             const statusColor = video.status === 'complete' ? '#00ff88' : 
                                video.status === 'caching' ? '#00ccff' :
                                video.status === 'paused' ? '#ffcc00' : '#ff3333';
-            const sizeText = video.blobSize ? _formatBytes(video.blobSize) : '';
             
-            html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;margin-bottom:6px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;">`;
+            html += `<div style="padding:12px;margin-bottom:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;">`;
+            html += `<div style="display:flex;align-items:center;justify-content:space-between;">`;
             html += `<div style="flex:1;min-width:0;">`;
             html += `<div style="font-size:13px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${video.title || '未知视频'}</div>`;
-            html += `<div style="font-size:11px;color:#888;margin-top:2px;">${video.episodeName} <span style="color:${statusColor};">${statusText}</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}</div>`;
+            html += `<div style="font-size:11px;color:#888;margin-top:2px;">${video.episodeName} <span style="color:${statusColor};">${statusText}</span> ${sizeText ? '<span style="color:#555;">'+sizeText+'</span>' : ''}</div>`;
             html += `</div>`;
             html += `<div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;">`;
             if (video.status === 'complete') {
-                html += `<button onclick="playFromOfflineList('${video.id}')" style="padding:5px 12px;background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.3);border-radius:6px;color:#00ff88;font-size:11px;cursor:pointer;font-weight:500;">播放</button>`;
+                html += `<button onclick="playFromOfflineList('${video.id}')" style="padding:5px 12px;background:rgba(0,255,136,0.1);border:1px solid rgba(0,255,136,0.2);border-radius:6px;color:#00ff88;font-size:11px;cursor:pointer;font-weight:500;">播放</button>`;
             } else if (video.status === 'paused') {
-                html += `<button onclick="resumeIndexOffline('${video.id}')" style="padding:5px 12px;background:rgba(0,204,255,0.15);border:1px solid rgba(0,204,255,0.3);border-radius:6px;color:#00ccff;font-size:11px;cursor:pointer;font-weight:500;">继续下载</button>`;
+                html += `<button onclick="resumeIndexOffline('${video.id}')" style="padding:5px 12px;background:rgba(0,204,255,0.1);border:1px solid rgba(0,204,255,0.2);border-radius:6px;color:#00ccff;font-size:11px;cursor:pointer;font-weight:500;">继续</button>`;
+            } else if (video.status === 'caching') {
+                html += `<button onclick="pauseIndexOffline('${video.id}')" style="padding:5px 12px;background:rgba(255,204,0,0.1);border:1px solid rgba(255,204,0,0.2);border-radius:6px;color:#ffcc00;font-size:11px;cursor:pointer;font-weight:500;">暂停</button>`;
             } else if (video.status === 'error') {
-                html += `<button onclick="retryIndexOffline('${video.id}')" style="padding:5px 12px;background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.3);border-radius:6px;color:#ff5050;font-size:11px;cursor:pointer;font-weight:500;">重试</button>`;
+                html += `<button onclick="retryIndexOffline('${video.id}')" style="padding:5px 12px;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.2);border-radius:6px;color:#ff5050;font-size:11px;cursor:pointer;font-weight:500;">重试</button>`;
             }
-            html += `<button onclick="deleteFromOfflineList('${video.id}')" style="padding:5px 12px;background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.3);border-radius:6px;color:#ff5050;font-size:11px;cursor:pointer;font-weight:500;">删除</button>`;
+            html += `<button onclick="deleteFromOfflineList('${video.id}')" style="padding:5px 12px;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.2);border-radius:6px;color:#ff5050;font-size:11px;cursor:pointer;font-weight:500;">删除</button>`;
             html += `</div></div>`;
+            
+            if (video.status !== 'error') {
+                const pct = video.status === 'complete' ? 100 : (video.progress || 0);
+                const barColor = video.status === 'complete' ? 'linear-gradient(90deg,#00ff88,#00cc66)' : video.status === 'paused' ? 'linear-gradient(90deg,#ffcc00,#ff9900)' : 'linear-gradient(90deg,#00ccff,#00ff88)';
+                html += `<div style="margin-top:8px;">`;
+                html += `<div style="background:rgba(255,255,255,0.06);border-radius:3px;height:3px;overflow:hidden;"><div style="height:100%;background:${barColor};width:${pct}%;border-radius:3px;transition:width 0.3s;"></div></div>`;
+                html += `</div>`;
+            }
+            html += `</div>`;
         });
     }
     
@@ -1106,11 +1119,53 @@ function _formatBytes(bytes) {
 }
 
 async function resumeIndexOffline(id) {
-    showToast('请在播放器页面中继续下载', 'info');
+    const db = await _openOfflineDB();
+    const video = await new Promise((resolve, reject) => {
+        const tx = db.transaction('videos', 'readonly');
+        const req = tx.objectStore('videos').get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    if (!video) return;
+    video.status = 'paused';
+    const tx = db.transaction('videos', 'readwrite');
+    tx.objectStore('videos').put(video);
+    tx.oncomplete = () => {
+        const params = new URLSearchParams({ offline: 'true', id: id, title: video.title || '', ep: video.episodeName || '' });
+        window.location.href = 'player.html?' + params.toString();
+    };
+}
+
+async function pauseIndexOffline(id) {
+    const db = await _openOfflineDB();
+    const video = await new Promise((resolve, reject) => {
+        const tx = db.transaction('videos', 'readonly');
+        const req = tx.objectStore('videos').get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    if (video && video.status === 'caching') {
+        video.status = 'paused';
+        const tx = db.transaction('videos', 'readwrite');
+        tx.objectStore('videos').put(video);
+        tx.oncomplete = () => {
+            showToast('已暂停，请在播放器页面继续下载', 'info');
+            showIndexOfflineList();
+        };
+    }
 }
 
 async function retryIndexOffline(id) {
-    showToast('请在播放器页面中重试下载', 'info');
+    const db = await _openOfflineDB();
+    const video = await new Promise((resolve, reject) => {
+        const tx = db.transaction('videos', 'readonly');
+        const req = tx.objectStore('videos').get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+    if (!video) return;
+    const params = new URLSearchParams({ offline: 'true', id: id, title: video.title || '', ep: video.episodeName || '' });
+    window.location.href = 'player.html?' + params.toString();
 }
 
 async function deleteFromOfflineList(id) {

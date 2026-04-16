@@ -2053,15 +2053,13 @@ function getOfflineEpisodeUrl(ep) {
 
 function showOfflineModal() {
     const modal = document.getElementById('modal');
-    const modalTitle = document.getElementById('modalTitle');
     const modalContent = document.getElementById('modalContent');
-    modalTitle.textContent = '离线缓存';
     
     const episodes = currentEpisodes || [];
     const currentIndex = currentEpisodeIndex || 0;
     
-    let html = '<div style="padding:12px;max-height:70vh;overflow-y:auto;">';
-    html += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
+    let html = '<div style="padding:12px;max-height:75vh;overflow-y:auto;min-width:420px;">';
+    html += '<div style="display:flex;gap:8px;margin-bottom:14px;">';
     html += '<button onclick="cacheCurrentEpisode()" style="flex:1;padding:10px 0;background:linear-gradient(135deg,#00ff88,#00cc66);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">⬇ 缓存本集</button>';
     html += '<button onclick="cacheAllEpisodes()" style="flex:1;padding:10px 0;background:linear-gradient(135deg,#00ccff,#0088ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">⬇ 全部缓存</button>';
     html += '</div>';
@@ -2070,25 +2068,31 @@ function showOfflineModal() {
     episodes.forEach((ep, index) => {
         const epName = getOfflineEpisodeName(ep, index);
         const isCurrent = index === currentIndex;
-        html += `<div id="offline-ep-${index}" style="display:flex;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);${isCurrent ? 'background:rgba(0,204,255,0.05);margin:0 -12px;padding:10px 12px;border-radius:6px;' : ''}">`;
-        html += `<div style="width:32px;height:32px;border-radius:6px;background:${isCurrent ? 'rgba(0,204,255,0.2)' : 'rgba(255,255,255,0.06)'};display:flex;align-items:center;justify-content:center;font-size:12px;color:${isCurrent ? '#00ccff' : '#888'};font-weight:600;flex-shrink:0;">${index + 1}</div>`;
-        html += `<div style="flex:1;min-width:0;margin-left:10px;">`;
+        html += `<div id="offline-ep-${index}" style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);">`;
+        html += `<div style="display:flex;align-items:center;gap:10px;">`;
+        html += `<div style="width:28px;height:28px;border-radius:6px;background:${isCurrent ? 'rgba(0,204,255,0.2)' : 'rgba(255,255,255,0.05)'};display:flex;align-items:center;justify-content:center;font-size:11px;color:${isCurrent ? '#00ccff' : '#666'};font-weight:600;flex-shrink:0;">${index + 1}</div>`;
+        html += `<div style="flex:1;min-width:0;">`;
         html += `<div style="font-size:13px;color:${isCurrent ? '#00ccff' : '#eee'};font-weight:${isCurrent ? '600' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${isCurrent ? '▶ ' : ''}${epName}</div>`;
-        html += `<div id="offline-status-${index}" style="font-size:11px;color:#666;margin-top:2px;"></div>`;
+        html += `<div id="offline-status-${index}" style="font-size:11px;color:#555;margin-top:2px;"></div>`;
         html += `</div>`;
-        html += `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:8px;">`;
-        html += `<button id="offline-btn-${index}" onclick="cacheEpisode(${index})" style="padding:5px 14px;background:rgba(0,204,255,0.12);border:1px solid rgba(0,204,255,0.25);border-radius:14px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;">缓存</button>`;
-        html += `</div></div>`;
+        html += `<button id="offline-btn-${index}" onclick="cacheEpisode(${index})" style="padding:5px 14px;background:rgba(0,204,255,0.1);border:1px solid rgba(0,204,255,0.2);border-radius:14px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;">缓存</button>`;
+        html += `</div>`;
+        html += `<div id="offline-bar-${index}" style="display:none;margin-top:6px;">`;
+        html += `<div style="display:flex;justify-content:space-between;font-size:10px;color:#888;margin-bottom:3px;"><span id="offline-bar-label-${index}"></span><span id="offline-bar-pct-${index}"></span></div>`;
+        html += `<div style="background:rgba(255,255,255,0.06);border-radius:3px;height:3px;overflow:hidden;"><div id="offline-bar-fill-${index}" style="height:100%;background:linear-gradient(90deg,#00ccff,#00ff88);width:0%;transition:width 0.3s;border-radius:3px;"></div></div>`;
+        html += `<div style="display:flex;justify-content:space-between;font-size:10px;color:#666;margin-top:3px;"><span id="offline-bar-speed-${index}"></span><span id="offline-bar-size-${index}"></span></div>`;
+        html += `</div>`;
+        html += `</div>`;
     });
     html += '</div>';
     
     html += '<div id="offlineProgressArea" style="margin-top:12px;display:none;">';
-    html += '<div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:14px;">';
+    html += '<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:14px;">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
     html += '<span id="offlineProgressLabel" style="font-size:13px;color:#ccc;font-weight:500;">准备缓存...</span>';
-    html += '<span id="offlineProgressPercent" style="font-size:13px;color:#00ccff;font-weight:600;">0%</span>';
+    html += '<span id="offlineProgressPercent" style="font-size:13px;color:#00ccff;font-weight:600;">0.00%</span>';
     html += '</div>';
-    html += '<div style="background:rgba(255,255,255,0.08);border-radius:4px;height:4px;overflow:hidden;">';
+    html += '<div style="background:rgba(255,255,255,0.06);border-radius:4px;height:4px;overflow:hidden;">';
     html += '<div id="offlineProgressBar" style="height:100%;background:linear-gradient(90deg,#00ccff,#00ff88);width:0%;transition:width 0.3s;border-radius:4px;"></div>';
     html += '</div>';
     html += '<div style="display:flex;justify-content:space-between;margin-top:8px;">';
@@ -2107,24 +2111,28 @@ async function checkOfflineStatuses() {
         const idx = video.episodeIndex;
         const statusEl = document.getElementById('offline-status-' + idx);
         const btnEl = document.getElementById('offline-btn-' + idx);
+        const barEl = document.getElementById('offline-bar-' + idx);
         if (!statusEl || !btnEl) return;
         const sizeText = video.blobSize ? formatBytes(video.blobSize) : '';
         const progressText = (typeof video.progress === 'number') ? video.progress.toFixed(2) : '0.00';
         if (video.status === 'complete') {
-            statusEl.innerHTML = `<span style="color:#00ff88;">✅ 已缓存</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
-            btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.25);border-radius:14px;color:#00ff88;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
+            statusEl.innerHTML = `<span style="color:#00ff88;">✅ 已缓存</span> ${sizeText ? '<span style="color:#555;">'+sizeText+'</span>' : ''}`;
+            btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,255,136,0.1);border:1px solid rgba(0,255,136,0.2);border-radius:14px;color:#00ff88;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
             btnEl.onclick = () => playOfflineById(video.id);
+            if (barEl) { barEl.style.display = 'block'; const fill = document.getElementById('offline-bar-fill-' + idx); const pct = document.getElementById('offline-bar-pct-' + idx); const lbl = document.getElementById('offline-bar-label-' + idx); const spd = document.getElementById('offline-bar-speed-' + idx); const sz = document.getElementById('offline-bar-size-' + idx); if (fill) fill.style.width = '100%'; if (pct) pct.textContent = '100%'; if (lbl) lbl.textContent = '已完成'; if (spd) spd.textContent = ''; if (sz) sz.textContent = sizeText; }
         } else if (video.status === 'caching') {
-            statusEl.innerHTML = `<span style="color:#00ccff;">⬇ ${progressText}%</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
-            btnEl.textContent = '暂停'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(255,204,0,0.12);border:1px solid rgba(255,204,0,0.25);border-radius:14px;color:#ffcc00;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
+            statusEl.innerHTML = `<span style="color:#00ccff;">⬇ ${progressText}%</span> ${sizeText ? '<span style="color:#555;">'+sizeText+'</span>' : ''}`;
+            btnEl.textContent = '暂停'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(255,204,0,0.1);border:1px solid rgba(255,204,0,0.2);border-radius:14px;color:#ffcc00;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
             btnEl.onclick = () => pauseCacheEpisode(idx);
+            if (barEl) { barEl.style.display = 'block'; const fill = document.getElementById('offline-bar-fill-' + idx); const pct = document.getElementById('offline-bar-pct-' + idx); const lbl = document.getElementById('offline-bar-label-' + idx); const sz = document.getElementById('offline-bar-size-' + idx); if (fill) fill.style.width = progressText + '%'; if (pct) pct.textContent = progressText + '%'; if (lbl) lbl.textContent = '下载中...'; if (sz) sz.textContent = sizeText; }
         } else if (video.status === 'paused') {
-            statusEl.innerHTML = `<span style="color:#ffcc00;">⏸ ${progressText}%</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
-            btnEl.textContent = '继续'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,204,255,0.12);border:1px solid rgba(0,204,255,0.25);border-radius:14px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
+            statusEl.innerHTML = `<span style="color:#ffcc00;">⏸ ${progressText}%</span> ${sizeText ? '<span style="color:#555;">'+sizeText+'</span>' : ''}`;
+            btnEl.textContent = '继续'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,204,255,0.1);border:1px solid rgba(0,204,255,0.2);border-radius:14px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
             btnEl.onclick = () => resumeCacheEpisode(idx);
+            if (barEl) { barEl.style.display = 'block'; const fill = document.getElementById('offline-bar-fill-' + idx); const pct = document.getElementById('offline-bar-pct-' + idx); const lbl = document.getElementById('offline-bar-label-' + idx); const sz = document.getElementById('offline-bar-size-' + idx); if (fill) { fill.style.width = progressText + '%'; fill.style.background = 'linear-gradient(90deg,#ffcc00,#ff9900)'; } if (pct) pct.textContent = progressText + '%'; if (lbl) lbl.textContent = '已暂停'; if (sz) sz.textContent = sizeText; }
         } else if (video.status === 'error') {
             statusEl.innerHTML = `<span style="color:#ff3333;">❌ 失败</span>`;
-            btnEl.textContent = '重试'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(255,80,80,0.12);border:1px solid rgba(255,80,80,0.25);border-radius:14px;color:#ff5050;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
+            btnEl.textContent = '重试'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.2);border-radius:14px;color:#ff5050;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
             btnEl.onclick = () => cacheEpisode(idx);
         }
     });
@@ -2275,9 +2283,12 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName, re
                             if (speedWindow.length > 10) speedWindow.shift();
                         }
                     } catch (segErr) {
-                        if (segErr.name === 'AbortError') throw segErr;
+                        if (segErr.name === 'AbortError') return;
                         retries--;
-                        if (retries <= 0) throw new Error('分片下载失败: 第' + (segIndex + 1) + '段');
+                        if (retries <= 0) {
+                            console.warn('分片下载跳过: 第' + (segIndex + 1) + '段');
+                            return;
+                        }
                         const delay = Math.min(2000 * (5 - retries), 8000);
                         await new Promise(r => setTimeout(r, delay));
                     }
@@ -2309,17 +2320,65 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName, re
         for (let w = 0; w < concurrency; w++) {
             workers.push(downloadWorker(pendingIndices));
         }
-        await Promise.all(workers);
+        await Promise.allSettled(workers);
+        
+        await saveOfflineVideo(record);
+        
+        const missingSegs = [];
+        for (let i = 0; i < segmentUrls.length; i++) {
+            const seg = await getSegment(cacheId + '_' + i);
+            if (!seg) missingSegs.push(i);
+        }
         
         if (!abortController.signal.aborted) {
-            record.status = 'complete';
-            record.progress = 100;
-            record.blobSize = totalBytes;
-            await saveOfflineVideo(record);
-            
-            if (statusEl) { statusEl.textContent = '✅ 已缓存'; statusEl.style.color = '#00ff88'; }
-            if (btnEl) { btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.25);border-radius:14px;color:#00ff88;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; btnEl.onclick = () => playOfflineById(cacheId); }
-            showToast(`${episodeName} 缓存完成`, 'success');
+            if (missingSegs.length === 0) {
+                record.status = 'complete';
+                record.progress = 100;
+                record.blobSize = totalBytes;
+                await saveOfflineVideo(record);
+                
+                if (statusEl) { statusEl.textContent = '✅ 已缓存'; statusEl.style.color = '#00ff88'; }
+                if (btnEl) { btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.25);border-radius:14px;color:#00ff88;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; btnEl.onclick = () => playOfflineById(cacheId); }
+                showToast(`${episodeName} 缓存完成`, 'success');
+            } else if (missingSegs.length <= 3) {
+                for (const idx of missingSegs) {
+                    if (abortController.signal.aborted) break;
+                    try {
+                        const segData = await downloadSegment(segmentUrls[idx], abortController.signal);
+                        await saveSegment(cacheId + '_' + idx, segData);
+                        totalBytes += segData.byteLength;
+                    } catch (e) {
+                        console.warn('补下载失败: 第' + (idx + 1) + '段');
+                    }
+                }
+                const stillMissing = [];
+                for (let i = 0; i < segmentUrls.length; i++) {
+                    if (!await getSegment(cacheId + '_' + i)) stillMissing.push(i);
+                }
+                if (stillMissing.length === 0) {
+                    record.status = 'complete';
+                    record.progress = 100;
+                    record.blobSize = totalBytes;
+                    await saveOfflineVideo(record);
+                    if (statusEl) { statusEl.textContent = '✅ 已缓存'; statusEl.style.color = '#00ff88'; }
+                    if (btnEl) { btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.25);border-radius:14px;color:#00ff88;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; btnEl.onclick = () => playOfflineById(cacheId); }
+                    showToast(`${episodeName} 缓存完成`, 'success');
+                } else {
+                    record.status = 'error';
+                    record.blobSize = totalBytes;
+                    await saveOfflineVideo(record);
+                    if (statusEl) { statusEl.innerHTML = `<span style="color:#ff3333;">❌ ${stillMissing.length}段失败</span>`; }
+                    if (btnEl) { btnEl.textContent = '重试'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(255,80,80,0.12);border:1px solid rgba(255,80,80,0.25);border-radius:14px;color:#ff5050;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; btnEl.onclick = () => cacheEpisode(episodeIndex); }
+                    showToast(`${episodeName} ${stillMissing.length}段下载失败，可重试续传`, 'error');
+                }
+            } else {
+                record.status = 'paused';
+                record.blobSize = totalBytes;
+                await saveOfflineVideo(record);
+                if (statusEl) { statusEl.innerHTML = `<span style="color:#ffcc00;">⏸ ${missingSegs.length}段待下载</span>`; }
+                if (btnEl) { btnEl.textContent = '继续'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,204,255,0.12);border:1px solid rgba(0,204,255,0.25);border-radius:14px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; btnEl.onclick = () => resumeCacheEpisode(episodeIndex); }
+                showToast(`${episodeName} ${missingSegs.length}段待下载，可继续`, 'info');
+            }
         }
     } catch (err) {
         if (err.name === 'AbortError') {
