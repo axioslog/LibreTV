@@ -128,7 +128,9 @@ function initializePageContent() {
             currentVideoTitle = offlineTitle;
             document.getElementById('videoTitle').textContent = offlineTitle;
             document.title = offlineTitle + ' - LibreTV播放器';
-            playOfflineById(offlineId);
+            waitForServiceWorker().then(() => {
+                playOfflineById(offlineId);
+            });
             return;
         }
     }
@@ -1916,6 +1918,22 @@ async function switchToResource(sourceKey, vodId) {
 let offlineDB = null;
 let activeCaches = {};
 
+function waitForServiceWorker() {
+    return new Promise((resolve) => {
+        if (!('serviceWorker' in navigator)) { resolve(); return; }
+        if (navigator.serviceWorker.controller) { resolve(); return; }
+        navigator.serviceWorker.ready.then(() => {
+            if (navigator.serviceWorker.controller) { resolve(); return; }
+            const onController = () => { resolve(); };
+            navigator.serviceWorker.addEventListener('controllerchange', onController, { once: true });
+            setTimeout(() => {
+                navigator.serviceWorker.removeEventListener('controllerchange', onController);
+                resolve();
+            }, 3000);
+        }).catch(() => resolve());
+    });
+}
+
 function openOfflineDB() {
     return new Promise((resolve, reject) => {
         if (offlineDB) { resolve(offlineDB); return; }
@@ -2036,6 +2054,7 @@ function showOfflineModal() {
     
     let html = '<div style="padding:16px;max-height:60vh;overflow-y:auto;">';
     html += '<div style="margin-bottom:16px;display:flex;gap:8px;">';
+    html += '<button onclick="playAndCache()" style="flex:1;padding:10px;background:linear-gradient(135deg,#ff9900,#ff6600);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">▶ 边播边缓存</button>';
     html += '<button onclick="cacheAllEpisodes()" style="flex:1;padding:10px;background:linear-gradient(135deg,#00ccff,#0088ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">缓存全部 (' + episodes.length + '集)</button>';
     html += '<button onclick="cacheCurrentEpisode()" style="flex:1;padding:10px;background:linear-gradient(135deg,#00ff88,#00cc66);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">缓存当前集</button>';
     html += '</div>';
@@ -2044,16 +2063,18 @@ function showOfflineModal() {
     episodes.forEach((ep, index) => {
         const epName = getOfflineEpisodeName(ep, index);
         const isCurrent = index === currentIndex;
-        html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;margin-bottom:4px;background:${isCurrent ? 'rgba(0,204,255,0.1)' : 'rgba(255,255,255,0.03)'};border:1px solid ${isCurrent ? 'rgba(0,204,255,0.3)' : 'rgba(255,255,255,0.05)'};border-radius:6px;" id="offline-ep-${index}">`;
-        html += `<div style="flex:1;min-width:0;"><span style="font-size:12px;color:${isCurrent ? '#00ccff' : '#ccc'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${isCurrent ? '▶ ' : ''}${epName}</span></div>`;
-        html += `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;" id="offline-actions-${index}">`;
-        html += `<span id="offline-status-${index}" style="font-size:11px;color:#888;"></span>`;
-        html += `<button onclick="cacheEpisode(${index})" style="padding:4px 10px;background:rgba(0,204,255,0.2);border:1px solid rgba(0,204,255,0.3);border-radius:4px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;" id="offline-btn-${index}">缓存</button>`;
+        html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;margin-bottom:6px;background:${isCurrent ? 'rgba(0,204,255,0.08)' : 'rgba(255,255,255,0.03)'};border:1px solid ${isCurrent ? 'rgba(0,204,255,0.25)' : 'rgba(255,255,255,0.06)'};border-radius:8px;" id="offline-ep-${index}">`;
+        html += `<div style="flex:1;min-width:0;">`;
+        html += `<div style="font-size:13px;color:${isCurrent ? '#00ccff' : '#eee'};font-weight:${isCurrent ? '600' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${isCurrent ? '▶ ' : ''}${epName}</div>`;
+        html += `<div style="font-size:11px;color:#888;margin-top:2px;" id="offline-status-${index}"></div>`;
+        html += `</div>`;
+        html += `<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:8px;" id="offline-actions-${index}">`;
+        html += `<button onclick="cacheEpisode(${index})" style="padding:5px 12px;background:rgba(0,204,255,0.15);border:1px solid rgba(0,204,255,0.3);border-radius:6px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;" id="offline-btn-${index}">缓存</button>`;
         html += `</div></div>`;
     });
     html += '</div>';
     html += '<div id="offlineProgressArea" style="margin-top:12px;display:none;">';
-    html += '<div style="background:rgba(255,255,255,0.05);border-radius:6px;padding:12px;">';
+    html += '<div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:12px;">';
     html += '<div style="display:flex;justify-content:space-between;margin-bottom:6px;">';
     html += '<span id="offlineProgressLabel" style="font-size:12px;color:#ccc;">准备缓存...</span>';
     html += '<span id="offlineProgressPercent" style="font-size:12px;color:#00ccff;">0%</span>';
@@ -2078,19 +2099,23 @@ async function checkOfflineStatuses() {
         const statusEl = document.getElementById('offline-status-' + idx);
         const btnEl = document.getElementById('offline-btn-' + idx);
         if (!statusEl || !btnEl) return;
+        const sizeText = video.blobSize ? formatBytes(video.blobSize) : '';
         if (video.status === 'complete') {
-            statusEl.textContent = '✅ 已缓存'; statusEl.style.color = '#00ff88';
-            btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:4px 10px;background:rgba(0,255,136,0.2);border:1px solid rgba(0,255,136,0.3);border-radius:4px;color:#00ff88;font-size:11px;cursor:pointer;';
+            statusEl.innerHTML = `<span style="color:#00ff88;">✅ 已缓存</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
+            btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:5px 12px;background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.3);border-radius:6px;color:#00ff88;font-size:11px;cursor:pointer;font-weight:500;';
             btnEl.onclick = () => playOfflineById(video.id);
         } else if (video.status === 'caching') {
-            statusEl.textContent = `⬇ ${video.progress || 0}%`; statusEl.style.color = '#00ccff';
-            btnEl.textContent = '暂停'; btnEl.onclick = () => pauseCacheEpisode(idx);
+            statusEl.innerHTML = `<span style="color:#00ccff;">⬇ ${video.progress || 0}%</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
+            btnEl.textContent = '暂停'; btnEl.style.cssText = 'padding:5px 12px;background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.3);border-radius:6px;color:#ffcc00;font-size:11px;cursor:pointer;font-weight:500;';
+            btnEl.onclick = () => pauseCacheEpisode(idx);
         } else if (video.status === 'paused') {
-            statusEl.textContent = `⏸ ${video.progress || 0}%`; statusEl.style.color = '#ffcc00';
-            btnEl.textContent = '继续'; btnEl.onclick = () => cacheEpisode(idx);
+            statusEl.innerHTML = `<span style="color:#ffcc00;">⏸ ${video.progress || 0}%</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
+            btnEl.textContent = '继续'; btnEl.style.cssText = 'padding:5px 12px;background:rgba(0,204,255,0.15);border:1px solid rgba(0,204,255,0.3);border-radius:6px;color:#00ccff;font-size:11px;cursor:pointer;font-weight:500;';
+            btnEl.onclick = () => cacheEpisode(idx);
         } else if (video.status === 'error') {
-            statusEl.textContent = '❌ 失败'; statusEl.style.color = '#ff3333';
-            btnEl.textContent = '重试'; btnEl.onclick = () => cacheEpisode(idx);
+            statusEl.innerHTML = `<span style="color:#ff3333;">❌ 失败</span>`;
+            btnEl.textContent = '重试'; btnEl.style.cssText = 'padding:5px 12px;background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.3);border-radius:6px;color:#ff5050;font-size:11px;cursor:pointer;font-weight:500;';
+            btnEl.onclick = () => cacheEpisode(idx);
         }
     });
 }
@@ -2103,10 +2128,32 @@ async function cacheEpisode(index) {
     const existing = await getOfflineVideo(cacheId);
     if (existing && existing.status === 'complete') { playOfflineById(cacheId); return; }
     if (existing && existing.status === 'caching') { pauseCacheEpisode(index); return; }
-    startEpisodeCache(cacheId, index, epUrl, epName);
+    if (existing && existing.status === 'paused') {
+        startEpisodeCache(cacheId, index, epUrl, epName, existing.progress || 1);
+    } else {
+        startEpisodeCache(cacheId, index, epUrl, epName, 0);
+    }
 }
 
 async function cacheCurrentEpisode() { await cacheEpisode(currentEpisodeIndex || 0); }
+
+async function playAndCache() {
+    if (!currentEpisodes || !currentEpisodes[currentEpisodeIndex]) return;
+    const epUrl = getOfflineEpisodeUrl(currentEpisodes[currentEpisodeIndex]);
+    const epName = getOfflineEpisodeName(currentEpisodes[currentEpisodeIndex], currentEpisodeIndex);
+    const cacheId = getOfflineCacheId(currentEpisodeIndex);
+    const existing = await getOfflineVideo(cacheId);
+    if (existing && existing.status === 'complete') {
+        showToast('当前集已缓存，可直接离线播放', 'info');
+        return;
+    }
+    if (existing && existing.status === 'caching') {
+        showToast('当前集正在缓存中', 'info');
+        return;
+    }
+    startEpisodeCache(cacheId, currentEpisodeIndex, epUrl, epName, existing ? 1 : 0);
+    showToast('边播边缓存已启动', 'success');
+}
 
 async function cacheAllEpisodes() {
     if (!currentEpisodes || currentEpisodes.length === 0) { showToast('没有可缓存的剧集', 'error'); return; }
@@ -2120,58 +2167,98 @@ async function cacheAllEpisodes() {
     }
 }
 
-async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName) {
+async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName, resumeFrom = 0) {
     const statusEl = document.getElementById('offline-status-' + episodeIndex);
     const btnEl = document.getElementById('offline-btn-' + episodeIndex);
     const progressArea = document.getElementById('offlineProgressArea');
     
-    if (statusEl) { statusEl.textContent = '⬇ 解析中...'; statusEl.style.color = '#00ccff'; }
+    if (statusEl) { statusEl.textContent = resumeFrom > 0 ? '⬇ 续传中...' : '⬇ 解析中...'; statusEl.style.color = '#00ccff'; }
     if (btnEl) { btnEl.textContent = '暂停'; btnEl.onclick = () => pauseCacheEpisode(episodeIndex); }
     if (progressArea) progressArea.style.display = 'block';
     
     const abortController = new AbortController();
-    const record = {
-        id: cacheId,
-        episodeIndex,
-        m3u8Url,
-        episodeName,
-        title: currentVideoTitle,
-        status: 'caching',
-        progress: 0,
-        timestamp: Date.now()
-    };
+    
+    let record = await getOfflineVideo(cacheId);
+    if (!record || resumeFrom === 0) {
+        record = {
+            id: cacheId,
+            episodeIndex,
+            m3u8Url,
+            episodeName,
+            title: currentVideoTitle,
+            status: 'caching',
+            progress: 0,
+            timestamp: Date.now()
+        };
+    } else {
+        record.status = 'caching';
+    }
     await saveOfflineVideo(record);
     activeCaches[cacheId] = { controller: abortController };
     
     try {
-        updateOfflineProgress(episodeName, 0, 0, 0);
+        let segmentUrls = record.segmentUrls || [];
+        let m3u8Content = record.m3u8Content || '';
+        let keyInfos = [];
+        let totalBytes = record.blobSize || 0;
+        let startSegIndex = 0;
         
-        const { segmentUrls, m3u8Content, keyInfos } = await parseM3u8AndGetSegments(m3u8Url, abortController.signal);
-        if (segmentUrls.length === 0) throw new Error('未找到视频分片');
-        
-        record.m3u8Content = m3u8Content;
-        record.segmentCount = segmentUrls.length;
-        record.segmentUrls = segmentUrls;
-        record.keyCount = keyInfos.length;
-        
-        for (let k = 0; k < keyInfos.length; k++) {
-            if (abortController.signal.aborted) break;
-            try {
-                const keyData = await downloadSegment(keyInfos[k].uri, abortController.signal);
-                await saveSegment(cacheId + '_key_' + k, keyData);
-            } catch (keyErr) {
-                console.warn('加密密钥下载失败:', keyErr);
+        if (!m3u8Content || !segmentUrls.length) {
+            updateOfflineProgress(episodeName, 0, 0, 0);
+            const parsed = await parseM3u8AndGetSegments(m3u8Url, abortController.signal);
+            if (parsed.segmentUrls.length === 0) throw new Error('未找到视频分片');
+            segmentUrls = parsed.segmentUrls;
+            m3u8Content = parsed.m3u8Content;
+            keyInfos = parsed.keyInfos;
+            
+            record.m3u8Content = m3u8Content;
+            record.segmentCount = segmentUrls.length;
+            record.segmentUrls = segmentUrls;
+            record.keyCount = keyInfos.length;
+            
+            for (let k = 0; k < keyInfos.length; k++) {
+                if (abortController.signal.aborted) break;
+                try {
+                    const existingKey = await getSegment(cacheId + '_key_' + k);
+                    if (existingKey) continue;
+                    const keyData = await downloadSegment(keyInfos[k].uri, abortController.signal);
+                    await saveSegment(cacheId + '_key_' + k, keyData);
+                } catch (keyErr) {
+                    console.warn('加密密钥下载失败:', keyErr);
+                }
+            }
+        } else {
+            for (let i = 0; i < segmentUrls.length; i++) {
+                const existing = await getSegment(cacheId + '_' + i);
+                if (existing) {
+                    totalBytes += existing.byteLength;
+                    startSegIndex = i + 1;
+                } else {
+                    startSegIndex = i;
+                    break;
+                }
+            }
+            if (startSegIndex >= segmentUrls.length) {
+                record.status = 'complete';
+                record.progress = 100;
+                record.blobSize = totalBytes;
+                await saveOfflineVideo(record);
+                if (statusEl) { statusEl.textContent = '✅ 已缓存'; statusEl.style.color = '#00ff88'; }
+                if (btnEl) { btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:4px 10px;background:rgba(0,255,136,0.2);border:1px solid rgba(0,255,136,0.3);border-radius:4px;color:#00ff88;font-size:11px;cursor:pointer;'; btnEl.onclick = () => playOfflineById(cacheId); }
+                showToast(`${episodeName} 已全部缓存`, 'success');
+                delete activeCaches[cacheId];
+                return;
             }
         }
         
-        if (statusEl) { statusEl.textContent = `⬇ 0/${segmentUrls.length}`; }
-        updateOfflineProgress(episodeName, 0, 0, 0);
+        if (statusEl) { statusEl.textContent = `⬇ ${startSegIndex}/${segmentUrls.length}`; }
+        const progressBase = Math.round(startSegIndex / segmentUrls.length * 100);
+        updateOfflineProgress(episodeName, progressBase, 0, totalBytes);
         
-        let totalBytes = 0;
         let lastTime = Date.now();
-        let lastBytes = 0;
+        let lastBytes = totalBytes;
         
-        for (let i = 0; i < segmentUrls.length; i++) {
+        for (let i = startSegIndex; i < segmentUrls.length; i++) {
             if (abortController.signal.aborted) break;
             
             let segData = null;
@@ -2192,6 +2279,7 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName) {
             
             const progress = Math.round((i + 1) / segmentUrls.length * 100);
             record.progress = progress;
+            record.blobSize = totalBytes;
             
             const now = Date.now();
             const elapsed = (now - lastTime) / 1000;
@@ -2217,6 +2305,7 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName) {
     } catch (err) {
         if (err.name === 'AbortError') {
             record.status = 'paused';
+            record.blobSize = record.blobSize || 0;
             await saveOfflineVideo(record);
             if (statusEl) { statusEl.textContent = `⏸ ${record.progress}%`; statusEl.style.color = '#ffcc00'; }
             if (btnEl) { btnEl.textContent = '继续'; btnEl.onclick = () => cacheEpisode(episodeIndex); }
@@ -2224,6 +2313,7 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName) {
         } else {
             console.error('缓存失败:', err);
             record.status = 'error';
+            record.blobSize = record.blobSize || 0;
             await saveOfflineVideo(record);
             if (statusEl) { statusEl.textContent = '❌ 失败'; statusEl.style.color = '#ff3333'; }
             if (btnEl) { btnEl.textContent = '重试'; btnEl.onclick = () => cacheEpisode(episodeIndex); }
@@ -2487,13 +2577,40 @@ async function showOfflineList() {
         html += `<div style="flex:1;min-width:0;"><div style="font-size:13px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${video.title||'未知'}</div>`;
         html += `<div style="font-size:11px;color:#888;margin-top:2px;">${video.episodeName} <span style="color:${statusColor};">${statusText}</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}</div></div>`;
         html += `<div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;">`;
-        if (video.status === 'complete') html += `<button onclick="playOfflineById('${video.id}')" style="padding:4px 10px;background:rgba(0,255,136,0.2);border:1px solid rgba(0,255,136,0.3);border-radius:4px;color:#00ff88;font-size:11px;cursor:pointer;">播放</button>`;
-        html += `<button onclick="deleteOfflineVideo('${video.id}').then(()=>showOfflineList())" style="padding:4px 10px;background:rgba(255,80,80,0.2);border:1px solid rgba(255,80,80,0.3);border-radius:4px;color:#ff5050;font-size:11px;cursor:pointer;">删除</button>`;
+        if (video.status === 'complete') {
+            html += `<button onclick="playOfflineById('${video.id}')" style="padding:5px 12px;background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.3);border-radius:6px;color:#00ff88;font-size:11px;cursor:pointer;font-weight:500;">播放</button>`;
+        } else if (video.status === 'paused') {
+            html += `<button onclick="resumeOfflineCache('${video.id}')" style="padding:5px 12px;background:rgba(0,204,255,0.15);border:1px solid rgba(0,204,255,0.3);border-radius:6px;color:#00ccff;font-size:11px;cursor:pointer;font-weight:500;">继续下载</button>`;
+        } else if (video.status === 'caching') {
+            html += `<button onclick="pauseOfflineCache('${video.id}')" style="padding:5px 12px;background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.3);border-radius:6px;color:#ffcc00;font-size:11px;cursor:pointer;font-weight:500;">暂停</button>`;
+        } else if (video.status === 'error') {
+            html += `<button onclick="retryOfflineCache('${video.id}')" style="padding:5px 12px;background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.3);border-radius:6px;color:#ff5050;font-size:11px;cursor:pointer;font-weight:500;">重试</button>`;
+        }
+        html += `<button onclick="deleteOfflineVideo('${video.id}').then(()=>showOfflineList())" style="padding:5px 12px;background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.3);border-radius:6px;color:#ff5050;font-size:11px;cursor:pointer;font-weight:500;">删除</button>`;
         html += `</div></div>`;
     });
     html += '</div>';
     modalContent.innerHTML = html;
     modal.classList.remove('hidden');
+}
+
+async function resumeOfflineCache(id) {
+    const video = await getOfflineVideo(id);
+    if (!video || video.status !== 'paused') return;
+    startEpisodeCache(id, video.episodeIndex, video.m3u8Url, video.episodeName, video.progress || 1);
+    showOfflineList();
+}
+
+async function pauseOfflineCache(id) {
+    if (activeCaches[id]) activeCaches[id].controller.abort();
+    setTimeout(() => showOfflineList(), 500);
+}
+
+async function retryOfflineCache(id) {
+    const video = await getOfflineVideo(id);
+    if (!video) return;
+    startEpisodeCache(id, video.episodeIndex, video.m3u8Url, video.episodeName, 1);
+    showOfflineList();
 }
 
 // =================================
