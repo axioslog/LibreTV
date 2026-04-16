@@ -2247,45 +2247,69 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName, re
         if (statusEl) { statusEl.textContent = `⬇ ${startSegIndex}/${segmentUrls.length}`; }
         updateOfflineProgress(episodeName, progressBase, 0, totalBytes);
         
-        let lastTime = Date.now();
-        let lastBytes = totalBytes;
-        let currentSpeed = 0;
-        
+        const pendingIndices = [];
         for (let i = startSegIndex; i < segmentUrls.length; i++) {
-            if (abortController.signal.aborted) break;
-            
-            let segData = null;
-            let retries = 5;
-            while (retries > 0 && !segData) {
-                try {
-                    const segStart = Date.now();
-                    segData = await downloadSegment(segmentUrls[i], abortController.signal);
-                    const segEnd = Date.now();
-                    const segDuration = (segEnd - segStart) / 1000;
-                    if (segDuration > 0 && segData.byteLength > 0) {
-                        currentSpeed = segData.byteLength / segDuration;
+            pendingIndices.push(i);
+        }
+        
+        let completedCount = startSegIndex;
+        let speedWindow = [];
+        let lastSaveTime = Date.now();
+        
+        const concurrency = Math.min(6, pendingIndices.length);
+        
+        async function downloadWorker(taskQueue) {
+            while (taskQueue.length > 0 && !abortController.signal.aborted) {
+                const segIndex = taskQueue.shift();
+                if (segIndex === undefined) break;
+                
+                let segData = null;
+                let retries = 5;
+                while (retries > 0 && !segData && !abortController.signal.aborted) {
+                    try {
+                        const t0 = Date.now();
+                        segData = await downloadSegment(segmentUrls[segIndex], abortController.signal);
+                        const dt = (Date.now() - t0) / 1000;
+                        if (dt > 0 && segData.byteLength > 0) {
+                            speedWindow.push(segData.byteLength / dt);
+                            if (speedWindow.length > 10) speedWindow.shift();
+                        }
+                    } catch (segErr) {
+                        if (segErr.name === 'AbortError') throw segErr;
+                        retries--;
+                        if (retries <= 0) throw new Error('分片下载失败: 第' + (segIndex + 1) + '段');
+                        const delay = Math.min(2000 * (5 - retries), 8000);
+                        await new Promise(r => setTimeout(r, delay));
                     }
-                } catch (segErr) {
-                    if (segErr.name === 'AbortError') throw segErr;
-                    retries--;
-                    if (retries <= 0) throw new Error('分片下载失败: 第' + (i + 1) + '段');
-                    const delay = Math.min(2000 * (5 - retries), 8000);
-                    await new Promise(r => setTimeout(r, delay));
+                }
+                
+                if (segData) {
+                    await saveSegment(cacheId + '_' + segIndex, segData);
+                    totalBytes += segData.byteLength;
+                    completedCount++;
+                    
+                    const progress = (completedCount / segmentUrls.length * 100);
+                    record.progress = Math.round(progress * 100) / 100;
+                    record.blobSize = totalBytes;
+                    
+                    const avgSpeed = speedWindow.length > 0 ? speedWindow.reduce((a, b) => a + b, 0) / speedWindow.length : 0;
+                    
+                    if (statusEl) { statusEl.textContent = `⬇ ${completedCount}/${segmentUrls.length}`; }
+                    updateOfflineProgress(episodeName, progress, avgSpeed, totalBytes);
+                    
+                    if (Date.now() - lastSaveTime > 3000) {
+                        await saveOfflineVideo(record);
+                        lastSaveTime = Date.now();
+                    }
                 }
             }
-            
-            await saveSegment(cacheId + '_' + i, segData);
-            totalBytes += segData.byteLength;
-            
-            const progress = ((i + 1) / segmentUrls.length * 100);
-            record.progress = Math.round(progress * 100) / 100;
-            record.blobSize = totalBytes;
-            
-            if (statusEl) { statusEl.textContent = `⬇ ${i + 1}/${segmentUrls.length}`; }
-            updateOfflineProgress(episodeName, progress, currentSpeed, totalBytes);
-            
-            if (i % 5 === 0) await saveOfflineVideo(record);
         }
+        
+        const workers = [];
+        for (let w = 0; w < concurrency; w++) {
+            workers.push(downloadWorker(pendingIndices));
+        }
+        await Promise.all(workers);
         
         if (!abortController.signal.aborted) {
             record.status = 'complete';
