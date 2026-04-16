@@ -2062,7 +2062,6 @@ function showOfflineModal() {
     
     let html = '<div style="padding:12px;max-height:70vh;overflow-y:auto;">';
     html += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
-    html += '<button onclick="playAndCache()" style="flex:1;padding:10px 0;background:linear-gradient(135deg,#ff9900,#ff6600);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">▶ 边播边缓存</button>';
     html += '<button onclick="cacheCurrentEpisode()" style="flex:1;padding:10px 0;background:linear-gradient(135deg,#00ff88,#00cc66);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">⬇ 缓存本集</button>';
     html += '<button onclick="cacheAllEpisodes()" style="flex:1;padding:10px 0;background:linear-gradient(135deg,#00ccff,#0088ff);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">⬇ 全部缓存</button>';
     html += '</div>';
@@ -2110,21 +2109,22 @@ async function checkOfflineStatuses() {
         const btnEl = document.getElementById('offline-btn-' + idx);
         if (!statusEl || !btnEl) return;
         const sizeText = video.blobSize ? formatBytes(video.blobSize) : '';
+        const progressText = (typeof video.progress === 'number') ? video.progress.toFixed(2) : '0.00';
         if (video.status === 'complete') {
             statusEl.innerHTML = `<span style="color:#00ff88;">✅ 已缓存</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
-            btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:5px 12px;background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.3);border-radius:6px;color:#00ff88;font-size:11px;cursor:pointer;font-weight:500;';
+            btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.25);border-radius:14px;color:#00ff88;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
             btnEl.onclick = () => playOfflineById(video.id);
         } else if (video.status === 'caching') {
-            statusEl.innerHTML = `<span style="color:#00ccff;">⬇ ${video.progress || 0}%</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
-            btnEl.textContent = '暂停'; btnEl.style.cssText = 'padding:5px 12px;background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.3);border-radius:6px;color:#ffcc00;font-size:11px;cursor:pointer;font-weight:500;';
+            statusEl.innerHTML = `<span style="color:#00ccff;">⬇ ${progressText}%</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
+            btnEl.textContent = '暂停'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(255,204,0,0.12);border:1px solid rgba(255,204,0,0.25);border-radius:14px;color:#ffcc00;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
             btnEl.onclick = () => pauseCacheEpisode(idx);
         } else if (video.status === 'paused') {
-            statusEl.innerHTML = `<span style="color:#ffcc00;">⏸ ${video.progress || 0}%</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
-            btnEl.textContent = '继续'; btnEl.style.cssText = 'padding:5px 12px;background:rgba(0,204,255,0.15);border:1px solid rgba(0,204,255,0.3);border-radius:6px;color:#00ccff;font-size:11px;cursor:pointer;font-weight:500;';
-            btnEl.onclick = () => cacheEpisode(idx);
+            statusEl.innerHTML = `<span style="color:#ffcc00;">⏸ ${progressText}%</span> ${sizeText ? '<span style="color:#666;">'+sizeText+'</span>' : ''}`;
+            btnEl.textContent = '继续'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,204,255,0.12);border:1px solid rgba(0,204,255,0.25);border-radius:14px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
+            btnEl.onclick = () => resumeCacheEpisode(idx);
         } else if (video.status === 'error') {
             statusEl.innerHTML = `<span style="color:#ff3333;">❌ 失败</span>`;
-            btnEl.textContent = '重试'; btnEl.style.cssText = 'padding:5px 12px;background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.3);border-radius:6px;color:#ff5050;font-size:11px;cursor:pointer;font-weight:500;';
+            btnEl.textContent = '重试'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(255,80,80,0.12);border:1px solid rgba(255,80,80,0.25);border-radius:14px;color:#ff5050;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;';
             btnEl.onclick = () => cacheEpisode(idx);
         }
     });
@@ -2147,24 +2147,6 @@ async function cacheEpisode(index) {
 
 async function cacheCurrentEpisode() { await cacheEpisode(currentEpisodeIndex || 0); }
 
-async function playAndCache() {
-    if (!currentEpisodes || !currentEpisodes[currentEpisodeIndex]) return;
-    const epUrl = getOfflineEpisodeUrl(currentEpisodes[currentEpisodeIndex]);
-    const epName = getOfflineEpisodeName(currentEpisodes[currentEpisodeIndex], currentEpisodeIndex);
-    const cacheId = getOfflineCacheId(currentEpisodeIndex);
-    const existing = await getOfflineVideo(cacheId);
-    if (existing && existing.status === 'complete') {
-        showToast('当前集已缓存，可直接离线播放', 'info');
-        return;
-    }
-    if (existing && existing.status === 'caching') {
-        showToast('当前集正在缓存中', 'info');
-        return;
-    }
-    startEpisodeCache(cacheId, currentEpisodeIndex, epUrl, epName, existing ? 1 : 0);
-    showToast('边播边缓存已启动', 'success');
-}
-
 async function cacheAllEpisodes() {
     if (!currentEpisodes || currentEpisodes.length === 0) { showToast('没有可缓存的剧集', 'error'); return; }
     showToast(`开始缓存全部 ${currentEpisodes.length} 集`, 'info');
@@ -2183,7 +2165,7 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName, re
     const progressArea = document.getElementById('offlineProgressArea');
     
     if (statusEl) { statusEl.textContent = resumeFrom > 0 ? '⬇ 续传中...' : '⬇ 解析中...'; statusEl.style.color = '#00ccff'; }
-    if (btnEl) { btnEl.textContent = '暂停'; btnEl.onclick = () => pauseCacheEpisode(episodeIndex); }
+    if (btnEl) { btnEl.textContent = '暂停'; btnEl.onclick = () => pauseCacheEpisode(episodeIndex); btnEl.style.cssText = 'padding:5px 14px;background:rgba(255,204,0,0.12);border:1px solid rgba(255,204,0,0.25);border-radius:14px;color:#ffcc00;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; }
     if (progressArea) progressArea.style.display = 'block';
     
     const abortController = new AbortController();
@@ -2204,7 +2186,7 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName, re
         record.status = 'caching';
     }
     await saveOfflineVideo(record);
-    activeCaches[cacheId] = { controller: abortController };
+    activeCaches[cacheId] = { controller: abortController, episodeIndex };
     
     try {
         let segmentUrls = record.segmentUrls || [];
@@ -2254,52 +2236,55 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName, re
                 record.blobSize = totalBytes;
                 await saveOfflineVideo(record);
                 if (statusEl) { statusEl.textContent = '✅ 已缓存'; statusEl.style.color = '#00ff88'; }
-                if (btnEl) { btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:4px 10px;background:rgba(0,255,136,0.2);border:1px solid rgba(0,255,136,0.3);border-radius:4px;color:#00ff88;font-size:11px;cursor:pointer;'; btnEl.onclick = () => playOfflineById(cacheId); }
+                if (btnEl) { btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.25);border-radius:14px;color:#00ff88;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; btnEl.onclick = () => playOfflineById(cacheId); }
                 showToast(`${episodeName} 已全部缓存`, 'success');
                 delete activeCaches[cacheId];
                 return;
             }
         }
         
+        const progressBase = (startSegIndex / segmentUrls.length * 100);
         if (statusEl) { statusEl.textContent = `⬇ ${startSegIndex}/${segmentUrls.length}`; }
-        const progressBase = Math.round(startSegIndex / segmentUrls.length * 100);
         updateOfflineProgress(episodeName, progressBase, 0, totalBytes);
         
         let lastTime = Date.now();
         let lastBytes = totalBytes;
+        let currentSpeed = 0;
         
         for (let i = startSegIndex; i < segmentUrls.length; i++) {
             if (abortController.signal.aborted) break;
             
             let segData = null;
-            let retries = 3;
+            let retries = 5;
             while (retries > 0 && !segData) {
                 try {
+                    const segStart = Date.now();
                     segData = await downloadSegment(segmentUrls[i], abortController.signal);
+                    const segEnd = Date.now();
+                    const segDuration = (segEnd - segStart) / 1000;
+                    if (segDuration > 0 && segData.byteLength > 0) {
+                        currentSpeed = segData.byteLength / segDuration;
+                    }
                 } catch (segErr) {
                     if (segErr.name === 'AbortError') throw segErr;
                     retries--;
                     if (retries <= 0) throw new Error('分片下载失败: 第' + (i + 1) + '段');
-                    await new Promise(r => setTimeout(r, 1000));
+                    const delay = Math.min(2000 * (5 - retries), 8000);
+                    await new Promise(r => setTimeout(r, delay));
                 }
             }
             
             await saveSegment(cacheId + '_' + i, segData);
             totalBytes += segData.byteLength;
             
-            const progress = Math.round((i + 1) / segmentUrls.length * 100);
-            record.progress = progress;
+            const progress = ((i + 1) / segmentUrls.length * 100);
+            record.progress = Math.round(progress * 100) / 100;
             record.blobSize = totalBytes;
             
-            const now = Date.now();
-            const elapsed = (now - lastTime) / 1000;
-            const speed = elapsed > 0 ? (totalBytes - lastBytes) / elapsed : 0;
-            if (now - lastTime > 1000) { lastTime = now; lastBytes = totalBytes; }
-            
             if (statusEl) { statusEl.textContent = `⬇ ${i + 1}/${segmentUrls.length}`; }
-            updateOfflineProgress(episodeName, progress, speed, totalBytes);
+            updateOfflineProgress(episodeName, progress, currentSpeed, totalBytes);
             
-            if (i % 10 === 0) await saveOfflineVideo(record);
+            if (i % 5 === 0) await saveOfflineVideo(record);
         }
         
         if (!abortController.signal.aborted) {
@@ -2309,7 +2294,7 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName, re
             await saveOfflineVideo(record);
             
             if (statusEl) { statusEl.textContent = '✅ 已缓存'; statusEl.style.color = '#00ff88'; }
-            if (btnEl) { btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:4px 10px;background:rgba(0,255,136,0.2);border:1px solid rgba(0,255,136,0.3);border-radius:4px;color:#00ff88;font-size:11px;cursor:pointer;'; btnEl.onclick = () => playOfflineById(cacheId); }
+            if (btnEl) { btnEl.textContent = '播放'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,255,136,0.12);border:1px solid rgba(0,255,136,0.25);border-radius:14px;color:#00ff88;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; btnEl.onclick = () => playOfflineById(cacheId); }
             showToast(`${episodeName} 缓存完成`, 'success');
         }
     } catch (err) {
@@ -2317,16 +2302,16 @@ async function startEpisodeCache(cacheId, episodeIndex, m3u8Url, episodeName, re
             record.status = 'paused';
             record.blobSize = record.blobSize || 0;
             await saveOfflineVideo(record);
-            if (statusEl) { statusEl.textContent = `⏸ ${record.progress}%`; statusEl.style.color = '#ffcc00'; }
-            if (btnEl) { btnEl.textContent = '继续'; btnEl.onclick = () => cacheEpisode(episodeIndex); }
+            if (statusEl) { statusEl.innerHTML = `<span style="color:#ffcc00;">⏸ 已暂停 ${record.progress.toFixed(2)}%</span>`; }
+            if (btnEl) { btnEl.textContent = '继续'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,204,255,0.12);border:1px solid rgba(0,204,255,0.25);border-radius:14px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; btnEl.onclick = () => resumeCacheEpisode(episodeIndex); }
             showToast(`${episodeName} 缓存已暂停`, 'info');
         } else {
             console.error('缓存失败:', err);
             record.status = 'error';
             record.blobSize = record.blobSize || 0;
             await saveOfflineVideo(record);
-            if (statusEl) { statusEl.textContent = '❌ 失败'; statusEl.style.color = '#ff3333'; }
-            if (btnEl) { btnEl.textContent = '重试'; btnEl.onclick = () => cacheEpisode(episodeIndex); }
+            if (statusEl) { statusEl.innerHTML = `<span style="color:#ff3333;">❌ 失败</span>`; }
+            if (btnEl) { btnEl.textContent = '重试'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(255,80,80,0.12);border:1px solid rgba(255,80,80,0.25);border-radius:14px;color:#ff5050;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; btnEl.onclick = () => cacheEpisode(episodeIndex); }
             showToast(`${episodeName} 缓存失败: ${err.message}`, 'error');
         }
     } finally {
@@ -2443,7 +2428,30 @@ async function downloadSegment(segUrl, signal) {
 
 function pauseCacheEpisode(episodeIndex) {
     const cacheId = getOfflineCacheId(episodeIndex);
-    if (activeCaches[cacheId]) activeCaches[cacheId].controller.abort();
+    if (activeCaches[cacheId]) {
+        activeCaches[cacheId].controller.abort();
+    } else {
+        const btnEl = document.getElementById('offline-btn-' + episodeIndex);
+        if (btnEl) { btnEl.textContent = '继续'; btnEl.style.cssText = 'padding:5px 14px;background:rgba(0,204,255,0.12);border:1px solid rgba(0,204,255,0.25);border-radius:14px;color:#00ccff;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:500;'; btnEl.onclick = () => resumeCacheEpisode(episodeIndex); }
+        getOfflineVideo(cacheId).then(video => {
+            if (video && video.status === 'caching') {
+                video.status = 'paused';
+                saveOfflineVideo(video);
+            }
+        });
+    }
+}
+
+async function resumeCacheEpisode(episodeIndex) {
+    if (!currentEpisodes || !currentEpisodes[episodeIndex]) { showToast('无法获取视频地址', 'error'); return; }
+    const epUrl = getOfflineEpisodeUrl(currentEpisodes[episodeIndex]);
+    const epName = getOfflineEpisodeName(currentEpisodes[episodeIndex], episodeIndex);
+    const cacheId = getOfflineCacheId(episodeIndex);
+    const existing = await getOfflineVideo(cacheId);
+    if (!existing) { cacheEpisode(episodeIndex); return; }
+    if (existing.status === 'caching') { pauseCacheEpisode(episodeIndex); return; }
+    if (existing.status === 'complete') { playOfflineById(cacheId); return; }
+    startEpisodeCache(cacheId, episodeIndex, epUrl, epName, existing.progress || 1);
 }
 
 function updateOfflineProgress(name, progress, speed, totalBytes) {
@@ -2453,13 +2461,21 @@ function updateOfflineProgress(name, progress, speed, totalBytes) {
     const speedLabel = document.getElementById('offlineSpeedLabel');
     const sizeLabel = document.getElementById('offlineSizeLabel');
     if (label) label.textContent = name;
-    if (percent) percent.textContent = progress + '%';
-    if (bar) bar.style.width = progress + '%';
+    if (percent) percent.textContent = progress.toFixed(2) + '%';
+    if (bar) bar.style.width = progress.toFixed(2) + '%';
     if (speedLabel) {
         if (speed > 0) {
-            speedLabel.textContent = (speed / 1024).toFixed(0) + ' KB/s (' + (speed * 8 / 1000000).toFixed(1) + ' Mbps)';
+            const speedKB = speed / 1024;
+            const speedMbps = speed * 8 / 1000000;
+            if (speedKB > 1024) {
+                speedLabel.textContent = (speedKB / 1024).toFixed(1) + ' MB/s (' + speedMbps.toFixed(1) + ' Mbps)';
+            } else {
+                speedLabel.textContent = speedKB.toFixed(0) + ' KB/s (' + speedMbps.toFixed(1) + ' Mbps)';
+            }
+            speedLabel.style.color = speedMbps >= 5 ? '#00ff88' : speedMbps >= 2 ? '#ffcc00' : '#ff8800';
         } else {
             speedLabel.textContent = '';
+            speedLabel.style.color = '#888';
         }
     }
     if (sizeLabel) sizeLabel.textContent = totalBytes > 0 ? formatBytes(totalBytes) : '';
