@@ -17,7 +17,7 @@ const SITE_CONFIG = {
     url: 'https://libretv.is-an.org',
     description: '免费在线视频搜索与观看平台',
     logo: 'image/logo.png',
-    version: '3.0.1'
+    version: '3.1.0'
 };
 
 // API站点配置
