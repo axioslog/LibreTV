@@ -1955,18 +1955,28 @@ function openOfflineDB() {
     return new Promise((resolve, reject) => {
         if (offlineDB && !offlineDB.closed) { resolve(offlineDB); return; }
         offlineDB = null;
-        const request = indexedDB.open('LibreTVOffline', 5);
+        const request = indexedDB.open('LibreTVOffline', 6);
         request.onupgradeneeded = (e) => {
             const db = e.target.result;
             if (db.objectStoreNames.contains('segments')) {
                 db.deleteObjectStore('segments');
             }
             if (!db.objectStoreNames.contains('videos')) {
-                db.createObjectStore('videos', { keyPath: 'id' });
+                const videoStore = db.createObjectStore('videos', { keyPath: 'id' });
+                videoStore.createIndex('status', 'status', { unique: false });
+                videoStore.createIndex('sourceCode', 'sourceCode', { unique: false });
+                videoStore.createIndex('createdAt', 'createdAt', { unique: false });
+                videoStore.createIndex('expiresAt', 'expiresAt', { unique: false });
             }
-            db.createObjectStore('segments', { keyPath: 'id' });
+            const segmentStore = db.createObjectStore('segments', { keyPath: 'id' });
+            segmentStore.createIndex('cacheId', 'cacheId', { unique: false });
             if (!db.objectStoreNames.contains('blobs')) {
-                db.createObjectStore('blobs', { keyPath: 'id' });
+                const blobStore = db.createObjectStore('blobs', { keyPath: 'id' });
+                blobStore.createIndex('cacheId', 'cacheId', { unique: false });
+            }
+            if (!db.objectStoreNames.contains('cache_meta')) {
+                const metaStore = db.createObjectStore('cache_meta', { keyPath: 'id' });
+                metaStore.createIndex('key', 'key', { unique: true });
             }
         };
         request.onsuccess = (e) => {

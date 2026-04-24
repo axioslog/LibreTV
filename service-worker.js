@@ -55,13 +55,27 @@ self.addEventListener('activate', event => {
 
 function swOpenDB() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open('LibreTVOffline', 5);
+        const request = indexedDB.open('LibreTVOffline', 6);
         request.onupgradeneeded = (e) => {
             const db = e.target.result;
             if (db.objectStoreNames.contains('segments')) db.deleteObjectStore('segments');
-            if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath: 'id' });
-            db.createObjectStore('segments', { keyPath: 'id' });
-            if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('videos')) {
+                const videoStore = db.createObjectStore('videos', { keyPath: 'id' });
+                videoStore.createIndex('status', 'status', { unique: false });
+                videoStore.createIndex('sourceCode', 'sourceCode', { unique: false });
+                videoStore.createIndex('createdAt', 'createdAt', { unique: false });
+                videoStore.createIndex('expiresAt', 'expiresAt', { unique: false });
+            }
+            const segmentStore = db.createObjectStore('segments', { keyPath: 'id' });
+            segmentStore.createIndex('cacheId', 'cacheId', { unique: false });
+            if (!db.objectStoreNames.contains('blobs')) {
+                const blobStore = db.createObjectStore('blobs', { keyPath: 'id' });
+                blobStore.createIndex('cacheId', 'cacheId', { unique: false });
+            }
+            if (!db.objectStoreNames.contains('cache_meta')) {
+                const metaStore = db.createObjectStore('cache_meta', { keyPath: 'id' });
+                metaStore.createIndex('key', 'key', { unique: true });
+            }
         };
         request.onsuccess = (e) => resolve(e.target.result);
         request.onerror = (e) => reject(e.target.error);

@@ -42,11 +42,52 @@
             <span id="totalCount" style="font-size:12px;color:#888;margin-left:auto;"></span>
         </div>
     </div>
+
+    <!-- 存储空间提示 -->
+    <div id="storageInfo" class="storage-info" style="padding:12px 16px;background:rgba(255,255,255,0.02);border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:12px;color:#888;">存储空间</span>
+            <button onclick="showStorageMenu()" style="background:none;border:none;color:#00ccff;font-size:11px;cursor:pointer;">管理</button>
+        </div>
+        <div style="background:rgba(255,255,255,0.06);border-radius:4px;height:6px;overflow:hidden;margin-bottom:6px;">
+            <div id="storageBar" class="storage-bar" style="height:100%;background:linear-gradient(90deg,#00ccff,#00ff88);width:0%;transition:width 0.3s;"></div>
+        </div>
+        <div id="storageText" style="font-size:11px;color:#666;">加载中...</div>
+    </div>
+
+    <!-- 缓存统计 -->
+    <div id="cacheStats" class="cache-stats" style="padding:12px 16px;display:flex;gap:16px;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div class="stat-item" style="flex:1;text-align:center;">
+            <div id="statTotal" class="stat-value" style="font-size:18px;font-weight:600;color:#fff;">0</div>
+            <div class="stat-label" style="font-size:11px;color:#888;margin-top:2px;">总缓存</div>
+        </div>
+        <div class="stat-item" style="flex:1;text-align:center;">
+            <div id="statCaching" class="stat-value" style="font-size:18px;font-weight:600;color:#00ccff;">0</div>
+            <div class="stat-label" style="font-size:11px;color:#888;margin-top:2px;">下载中</div>
+        </div>
+        <div class="stat-item" style="flex:1;text-align:center;">
+            <div id="statComplete" class="stat-value" style="font-size:18px;font-weight:600;color:#00ff88;">0</div>
+            <div class="stat-label" style="font-size:11px;color:#888;margin-top:2px;">已完成</div>
+        </div>
+    </div>
+
     <div id="cacheList" style="padding:12px;max-width:600px;margin:0 auto;"></div>
     <div id="toast" class="toast"></div>
 
+    <!-- 存储管理菜单 -->
+    <div id="storageMenu" class="storage-menu" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:100;align-items:center;justify-content:center;">
+        <div style="background:#111;padding:20px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);width:90%;max-width:400px;">
+            <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;color:#fff;">存储管理</h3>
+            <button onclick="cleanFailedCache()" style="width:100%;padding:12px;margin-bottom:8px;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.2);border-radius:8px;color:#ff5050;font-size:13px;cursor:pointer;">清理失败缓存</button>
+            <button onclick="cleanOldCache()" style="width:100%;padding:12px;margin-bottom:8px;background:rgba(255,204,0,0.1);border:1px solid rgba(255,204,0,0.2);border-radius:8px;color:#ffcc00;font-size:13px;cursor:pointer;">清理30天前的缓存</button>
+            <button onclick="cleanAllCache()" style="width:100%;padding:12px;margin-bottom:16px;background:rgba(255,80,80,0.1);border:1px solid rgba(255,80,80,0.2);border-radius:8px;color:#ff5050;font-size:13px;cursor:pointer;">清理所有缓存</button>
+            <button onclick="hideStorageMenu()" style="width:100%;padding:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#fff;font-size:13px;cursor:pointer;">取消</button>
+        </div>
+    </div>
+
     <script src="js/config.js"></script>
     <script src="js/proxy-auth.js"></script>
+    <script src="js/offline-cache-enhanced.js"></script>
     <script>
     let offlineDB = null;
 
@@ -259,6 +300,125 @@
     }
 
     renderList();
+
+    // 更新存储信息
+    async function updateStorageInfo() {
+        try {
+            const info = await storageManager.getStorageInfo();
+            const storageBar = document.getElementById('storageBar');
+            const storageText = document.getElementById('storageText');
+
+            if (storageBar) {
+                storageBar.style.width = info.percentage + '%';
+            }
+
+            if (storageText) {
+                storageText.textContent = `已用 ${storageManager.formatBytes(info.used)} / ${storageManager.formatBytes(info.quota)}`;
+            }
+        } catch (error) {
+            console.error('Failed to update storage info:', error);
+        }
+    }
+
+    // 更新缓存统计
+    async function updateCacheStats() {
+        try {
+            const stats = await cacheStatistics.getStatistics();
+
+            const statTotal = document.getElementById('statTotal');
+            const statCaching = document.getElementById('statCaching');
+            const statComplete = document.getElementById('statComplete');
+
+            if (statTotal) statTotal.textContent = stats.total;
+            if (statCaching) statCaching.textContent = stats.caching;
+            if (statComplete) statComplete.textContent = stats.complete;
+        } catch (error) {
+            console.error('Failed to update cache stats:', error);
+        }
+    }
+
+    // 显示存储管理菜单
+    function showStorageMenu() {
+        const menu = document.getElementById('storageMenu');
+        if (menu) {
+            menu.style.display = 'flex';
+        }
+    }
+
+    // 隐藏存储管理菜单
+    function hideStorageMenu() {
+        const menu = document.getElementById('storageMenu');
+        if (menu) {
+            menu.style.display = 'none';
+        }
+    }
+
+    // 清理失败缓存
+    async function cleanFailedCache() {
+        if (!confirm('确定清理所有失败的缓存？')) {
+            return;
+        }
+
+        try {
+            const count = await storageManager.cleanFailedCache();
+            showToast(`已清理 ${count} 个失败缓存`, 'success');
+            hideStorageMenu();
+            updateStorageInfo();
+            updateCacheStats();
+            renderList();
+        } catch (error) {
+            console.error('Failed to clean failed cache:', error);
+            showToast('清理失败', 'error');
+        }
+    }
+
+    // 清理旧缓存
+    async function cleanOldCache() {
+        if (!confirm('确定清理30天前的缓存？')) {
+            return;
+        }
+
+        try {
+            const count = await storageManager.cleanOldCache(30);
+            showToast(`已清理 ${count} 个旧缓存`, 'success');
+            hideStorageMenu();
+            updateStorageInfo();
+            updateCacheStats();
+            renderList();
+        } catch (error) {
+            console.error('Failed to clean old cache:', error);
+            showToast('清理失败', 'error');
+        }
+    }
+
+    // 清理所有缓存
+    async function cleanAllCache() {
+        if (!confirm('确定清理所有缓存？此操作不可恢复！')) {
+            return;
+        }
+
+        try {
+            const count = await storageManager.cleanAllCache();
+            showToast(`已清理 ${count} 个缓存`, 'success');
+            hideStorageMenu();
+            updateStorageInfo();
+            updateCacheStats();
+            renderList();
+        } catch (error) {
+            console.error('Failed to clean all cache:', error);
+            showToast('清理失败', 'error');
+        }
+    }
+
+    // 初始化
+    updateStorageInfo();
+    updateCacheStats();
+
+    // 定期更新
+    setInterval(() => {
+        updateStorageInfo();
+        updateCacheStats();
+    }, 5000);
     </script>
 </body>
 </html>
