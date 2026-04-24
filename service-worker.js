@@ -1,4 +1,4 @@
-const CACHE_NAME = 'libretv-v3';
+const CACHE_NAME = 'libretv-v3.2';
 const STATIC_ASSETS = [
     '/',
     '/index.html',
@@ -22,6 +22,8 @@ const STATIC_ASSETS = [
     '/js/customer_site.js',
     '/js/pwa-register.js',
     '/js/version-check.js',
+    '/js/offline-cache-enhanced.js',
+    '/js/download-manager.js',
     '/libs/hls.min.js',
     '/libs/artplayer.min.js',
     '/libs/tailwindcss.min.js',

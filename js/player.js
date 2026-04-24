@@ -2451,90 +2451,156 @@ function extractKeyInfoFromM3u8(m3u8Content, baseUrl) {
 }
 
 async function parseM3u8AndGetSegments(m3u8Url, signal) {
-    let proxyUrl = PROXY_URL + encodeURIComponent(m3u8Url);
-    if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
-        proxyUrl = await window.ProxyAuth.addAuthToProxyUrl(proxyUrl);
-    }
+    // 添加超时控制
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), 30000); // 30秒超时
     
-    const resp = await fetch(proxyUrl, { signal });
-    if (!resp.ok) throw new Error('M3U8请求失败: HTTP ' + resp.status);
-    let content = await resp.text();
-    let baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
+    // 组合信号
+    const combinedSignal = signal || timeoutController.signal;
     
-    const lines = content.split('\n').map(l => l.trim()).filter(l => l);
-    let bestStreamUrl = '';
-    let bestBandwidth = 0;
-    
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
-            const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
-            const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
-            if (bandwidth > bestBandwidth && i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
-                bestBandwidth = bandwidth;
-                let streamUrl = lines[i + 1];
-                if (!streamUrl.startsWith('http') && !streamUrl.startsWith('/proxy/')) {
-                    streamUrl = baseUrl + streamUrl;
+    try {
+        let proxyUrl = PROXY_URL + encodeURIComponent(m3u8Url);
+        if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+            proxyUrl = await window.ProxyAuth.addAuthToProxyUrl(proxyUrl);
+        }
+        
+        const resp = await fetch(proxyUrl, { signal: combinedSignal });
+        if (!resp.ok) throw new Error('M3U8请求失败: HTTP ' + resp.status);
+        let content = await resp.text();
+        let baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
+        
+        const lines = content.split('\n').map(l => l.trim()).filter(l => l);
+        let bestStreamUrl = '';
+        let bestBandwidth = 0;
+        
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
+                const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
+                const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
+                if (bandwidth > bestBandwidth && i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
+                    bestBandwidth = bandwidth;
+                    let streamUrl = lines[i + 1];
+                    if (!streamUrl.startsWith('http') && !streamUrl.startsWith('/proxy/')) {
+                        streamUrl = baseUrl + streamUrl;
+                    }
+                    bestStreamUrl = streamUrl;
                 }
-                bestStreamUrl = streamUrl;
             }
         }
-    }
-    
-    if (bestStreamUrl) {
-        let streamProxyUrl;
-        if (bestStreamUrl.startsWith('/proxy/')) {
-            streamProxyUrl = bestStreamUrl;
-            if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
-                streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
-            }
-        } else {
-            streamProxyUrl = PROXY_URL + encodeURIComponent(bestStreamUrl);
-            if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
-                streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
-            }
-        }
-        const streamResp = await fetch(streamProxyUrl, { signal });
-        if (!streamResp.ok) throw new Error('子播放列表请求失败');
-        content = await streamResp.text();
-        if (bestStreamUrl.startsWith('http')) {
-            baseUrl = bestStreamUrl.substring(0, bestStreamUrl.lastIndexOf('/') + 1);
-        }
-    }
-    
-    const segmentUrls = [];
-    const m3u8Lines = content.split('\n');
-    for (const line of m3u8Lines) {
-        const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith('#')) {
-            if (trimmed.startsWith('http')) {
-                segmentUrls.push(trimmed);
-            } else if (trimmed.startsWith('/proxy/')) {
-                segmentUrls.push(trimmed);
+        
+        if (bestStreamUrl) {
+            let streamProxyUrl;
+            if (bestStreamUrl.startsWith('/proxy/')) {
+                streamProxyUrl = bestStreamUrl;
+                if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+                    streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
+                }
             } else {
-                segmentUrls.push(baseUrl + trimmed);
+                streamProxyUrl = PROXY_URL + encodeURIComponent(bestStreamUrl);
+                if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+                    streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
+                }
+            }
+            const streamResp = await fetch(streamProxyUrl, { signal: combinedSignal });
+            if (!streamResp.ok) throw new Error('子播放列表请求失败');
+            content = await streamResp.text();
+            if (bestStreamUrl.startsWith('http')) {
+                baseUrl = bestStreamUrl.substring(0, bestStreamUrl.lastIndexOf('/') + 1);
             }
         }
+        
+        const segmentUrls = [];
+        const m3u8Lines = content.split('\n');
+        for (const line of m3u8Lines) {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith('#')) {
+                if (trimmed.startsWith('http')) {
+                    segmentUrls.push(trimmed);
+                } else if (trimmed.startsWith('/proxy/')) {
+                    segmentUrls.push(trimmed);
+                } else {
+                    segmentUrls.push(baseUrl + trimmed);
+                }
+            }
+        }
+        const keyInfos = extractKeyInfoFromM3u8(content, baseUrl);
+        
+        clearTimeout(timeoutId);
+        
+        return { segmentUrls, m3u8Content: content, keyInfos };
+    } catch (error) {
+        clearTimeout(timeoutId);
+        
+        if (error.name === 'AbortError') {
+            throw new Error('M3U8解析超时，请检查网络连接');
+        }
+        
+        throw error;
     }
-    const keyInfos = extractKeyInfoFromM3u8(content, baseUrl);
-    return { segmentUrls, m3u8Content: content, keyInfos };
 }
 
-async function downloadSegment(segUrl, signal) {
-    let fetchUrl;
-    if (segUrl.startsWith('/proxy/')) {
-        fetchUrl = segUrl;
-        if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
-            fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(fetchUrl);
-        }
-    } else {
-        fetchUrl = PROXY_URL + encodeURIComponent(segUrl);
-        if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
-            fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(fetchUrl);
+async function downloadSegment(segUrl, signal, retries = 5) {
+    const maxRetries = retries;
+    let retryCount = 0;
+    
+    while (retryCount < maxRetries) {
+        try {
+            // 添加超时控制
+            const timeoutController = new AbortController();
+            const timeoutId = setTimeout(() => timeoutController.abort(), 15000); // 15秒超时
+            
+            // 组合信号
+            const combinedSignal = signal || timeoutController.signal;
+            
+            let fetchUrl;
+            if (segUrl.startsWith('/proxy/')) {
+                fetchUrl = segUrl;
+                if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+                    fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(fetchUrl);
+                }
+            } else {
+                fetchUrl = PROXY_URL + encodeURIComponent(segUrl);
+                if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+                    fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(fetchUrl);
+                }
+            }
+            
+            const resp = await fetch(fetchUrl, { signal: combinedSignal });
+            
+            clearTimeout(timeoutId);
+            
+            if (!resp.ok) {
+                throw new Error('HTTP ' + resp.status);
+            }
+            
+            return await resp.arrayBuffer();
+        } catch (error) {
+            retryCount++;
+            
+            if (error.name === 'AbortError') {
+                if (retryCount < maxRetries) {
+                    console.warn(`分片下载超时，重试 ${retryCount}/${maxRetries}:`, segUrl);
+                    // 指数退避
+                    const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 5000);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                } else {
+                    throw new Error('分片下载超时，已达到最大重试次数');
+                }
+            }
+            
+            if (retryCount < maxRetries) {
+                console.warn(`分片下载失败，重试 ${retryCount}/${maxRetries}:`, error.message);
+                // 指数退避
+                const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 5000);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                throw error;
+            }
         }
     }
-    const resp = await fetch(fetchUrl, { signal });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    return await resp.arrayBuffer();
+    
+    throw new Error('分片下载失败，已达到最大重试次数');
 }
 
 function pauseCacheEpisode(episodeIndex) {

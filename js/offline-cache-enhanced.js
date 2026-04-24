@@ -479,6 +479,126 @@ class CacheStatistics {
   }
 }
 
+// =================================
+// ========= IndexedDB 辅助函数 =========
+// =================================
+
+let offlineDB = null;
+
+function openDB() {
+    return new Promise((resolve, reject) => {
+        if (offlineDB && !offlineDB.closed) { resolve(offlineDB); return; }
+        offlineDB = null;
+        const req = indexedDB.open('LibreTVOffline', 6);
+        req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (db.objectStoreNames.contains('segments')) db.deleteObjectStore('segments');
+            if (!db.objectStoreNames.contains('videos')) {
+                const videoStore = db.createObjectStore('videos', { keyPath: 'id' });
+                videoStore.createIndex('status', 'status', { unique: false });
+                videoStore.createIndex('sourceCode', 'sourceCode', { unique: false });
+                videoStore.createIndex('createdAt', 'createdAt', { unique: false });
+                videoStore.createIndex('expiresAt', 'expiresAt', { unique: false });
+            }
+            const segmentStore = db.createObjectStore('segments', { keyPath: 'id' });
+            segmentStore.createIndex('cacheId', 'cacheId', { unique: false });
+            if (!db.objectStoreNames.contains('blobs')) {
+                const blobStore = db.createObjectStore('blobs', { keyPath: 'id' });
+                blobStore.createIndex('cacheId', 'cacheId', { unique: false });
+            }
+            if (!db.objectStoreNames.contains('cache_meta')) {
+                const metaStore = db.createObjectStore('cache_meta', { keyPath: 'id' });
+                metaStore.createIndex('key', 'key', { unique: true });
+            }
+        };
+        req.onsuccess = (e) => { 
+            offlineDB = e.target.result; 
+            offlineDB.onclose = () => { offlineDB = null; }; 
+            offlineDB.onversionchange = () => { offlineDB.close(); offlineDB = null; }; 
+            resolve(offlineDB); 
+        };
+        req.onerror = (e) => { offlineDB = null; reject(e.target.error); };
+        req.onblocked = () => { offlineDB = null; reject(new Error('数据库被占用')); };
+    });
+}
+
+async function getAllOfflineVideos() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('videos', 'readonly');
+        const req = tx.objectStore('videos').getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function getOfflineVideo(id) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('videos', 'readonly');
+        const req = tx.objectStore('videos').get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function saveOfflineVideo(record) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('videos', 'readwrite');
+        tx.objectStore('videos').put(record);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function deleteOfflineVideo(id) {
+    const db = await openDB();
+    const video = await getOfflineVideo(id);
+    const segCount = video?.segmentCount || 0;
+    const keyCount = video?.keyCount || 0;
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(['videos', 'segments', 'blobs'], 'readwrite');
+        tx.objectStore('videos').delete(id);
+        tx.objectStore('blobs').delete(id);
+        for (let i = 0; i < segCount; i++) tx.objectStore('segments').delete(id + '_' + i);
+        for (let i = 0; i < keyCount; i++) tx.objectStore('segments').delete(id + '_key_' + i);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function getSegment(id) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('segments', 'readonly');
+        const req = tx.objectStore('segments').get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function saveSegment(id, data) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('segments', 'readwrite');
+        const record = { id, data, timestamp: Date.now() };
+        tx.objectStore('segments').put(record);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function deleteSegment(id) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction('segments', 'readwrite');
+        tx.objectStore('segments').delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
 // 全局实例
 const cacheQueueManager = new CacheQueueManager(3);
 const storageManager = new StorageManager();
@@ -492,3 +612,13 @@ window.CacheStatistics = CacheStatistics;
 window.cacheQueueManager = cacheQueueManager;
 window.storageManager = storageManager;
 window.cacheStatistics = cacheStatistics;
+
+// 导出IndexedDB辅助函数
+window.openDB = openDB;
+window.getAllOfflineVideos = getAllOfflineVideos;
+window.getOfflineVideo = getOfflineVideo;
+window.saveOfflineVideo = saveOfflineVideo;
+window.deleteOfflineVideo = deleteOfflineVideo;
+window.getSegment = getSegment;
+window.saveSegment = saveSegment;
+window.deleteSegment = deleteSegment;
