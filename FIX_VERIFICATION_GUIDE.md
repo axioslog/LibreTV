@@ -210,6 +210,38 @@
 - 为 `showIndexOfflineList()` 添加了错误处理和日志
 - 确保离线缓存功能正常工作
 
+### Q6: 离线缓存时出现 "currentSourceCode is not defined" 错误
+
+**问题原因**：
+这是由于 `startEpisodeCache` 函数中使用了未定义的 `currentSourceCode` 变量导致的。
+
+**解决方案**：
+1. 确保已更新到最新版本（v3.2.0 或更高）
+2. 清除浏览器缓存并刷新页面
+3. 重新尝试缓存视频
+
+**技术细节**：
+- 已添加 `currentSourceCode` 全局变量定义
+- 在 `initializePageContent` 中设置 `currentSourceCode` 值
+- 修复了 `startEpisodeCache` 中的变量引用错误
+- 添加了调试日志输出 `currentSourceCode` 值
+
+### Q7: ArtPlayer 初始化错误 "Cannot read properties of null (reading '$parent')"
+
+**问题原因**：
+这是由于播放器容器元素不存在或初始化时机问题导致的。
+
+**解决方案**：
+1. 确保已更新到最新版本（v3.2.0 或更高）
+2. 清除浏览器缓存并刷新页面
+3. 检查播放器容器是否正常加载
+
+**技术细节**：
+- 已添加播放器容器存在性检查
+- 添加了播放器初始化错误处理
+- 改进了调试日志输出
+- 防止 ArtPlayer 初始化失败导致页面崩溃
+
 ## 技术细节
 
 ### Service Worker 缓存策略
