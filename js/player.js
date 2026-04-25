@@ -517,6 +517,17 @@ function initPlayer(videoUrl, options = {}) {
     if (!videoUrl) {
         return
     }
+    
+    // 检查播放器容器是否存在
+    const playerContainer = document.querySelector('#player');
+    if (!playerContainer) {
+        console.error('[Player] Player container not found');
+        showError('播放器容器未找到，请刷新页面重试');
+        return;
+    }
+    
+    console.log('[Player] Player container found, initializing...');
+    
     const isOffline = options.isOffline || false;
 
     // 销毁旧实例
