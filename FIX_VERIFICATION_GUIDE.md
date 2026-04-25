@@ -183,6 +183,33 @@
 - 避免了与 `offline-cache-enhanced.js` 的变量冲突
 - 两个文件现在可以正常共存
 
+### Q5: 离线缓存功能无法使用，点击离线管理页面无法打开
+
+**问题原因**：
+这是由于不同文件中 IndexedDB 数据库版本不一致导致的：
+- `ui.js` 使用数据库版本 5
+- `offline.html` 使用数据库版本 5
+- `player.js` 和 `offline-cache-enhanced.js` 使用数据库版本 6
+
+**解决方案**：
+1. 确保已更新到最新版本（v3.2.0 或更高）
+2. 清除浏览器缓存和 IndexedDB 数据
+3. 刷新页面后重试
+
+**清除 IndexedDB 数据的方法**：
+1. 按 `F12` 打开开发者工具
+2. 进入 "Application" 或 "应用程序" 标签
+3. 左侧找到 "Storage" > "IndexedDB"
+4. 找到 "LibreTVOffline" 数据库
+5. 右键点击并选择 "Delete database" 或 "删除数据库"
+6. 刷新页面
+
+**技术细节**：
+- 已将所有文件的数据库版本统一为 6
+- 更新了数据库结构，添加了必要的索引
+- 为 `showIndexOfflineList()` 添加了错误处理和日志
+- 确保离线缓存功能正常工作
+
 ## 技术细节
 
 ### Service Worker 缓存策略
