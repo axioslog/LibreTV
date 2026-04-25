@@ -1,0 +1,33 @@
+# LibreTV 缓存问题修复任务
+
+## 问题描述
+1. 点击缓存按钮一直处于解析中，并没有下载
+2. 缓存页面也没有正在下载的信息
+3. 首页的缓存图标有2个，明显不正确
+
+## 项目位置
+C:\Users\Administrator\.openclaw\workspace\LibreTV
+
+## 需要检查的文件
+1. index.html - 检查首页缓存图标是否重复
+2. player.js - 检查缓存下载逻辑
+3. offline.html - 检查缓存页面显示逻辑
+4. ui.js - 检查 showIndexOfflineList 函数
+
+## 分析步骤
+1. 检查 index.html 中是否有重复的缓存图标
+2. 检查 player.js 中的 cacheEpisode 函数，找出为什么一直处于"解析中"状态
+3. 检查 offline.html 中的下载状态显示逻辑
+4. 修复所有发现的问题
+
+## 修复要求
+- 一次性解决所有问题
+- 确保缓存功能正常工作
+- 确保缓存页面正确显示下载状态
+- 确保首页只有一个缓存图标
+
+## 已知问题
+1. player.js 第572-576行添加了缓存按钮到 ArtPlayer 控制栏
+2. index.html 第31行有一个离线缓存按钮
+3. 可能存在重复添加缓存按钮的情况
+4. cacheEpisode 函数可能没有正确处理下载状态

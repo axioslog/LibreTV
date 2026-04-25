@@ -97,25 +97,13 @@ Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
 // 页面加载
 document.addEventListener('DOMContentLoaded', function () {
-    console.log('[Player] DOMContentLoaded, starting initialization...');
-    console.log('[Player] URL params:', window.location.search);
-    
     // 先检查用户是否已通过密码验证
-    const passwordVerified = isPasswordVerified();
-    console.log('[Player] Password verified:', passwordVerified);
-    console.log('[Player] Password protected:', isPasswordProtected());
-    console.log('[Player] ENV PASSWORD:', window.__ENV__?.PASSWORD ? 'set' : 'not set');
-    
-    if (!passwordVerified) {
-        console.log('[Player] Password not verified, showing modal');
+    if (!isPasswordVerified()) {
         // 隐藏加载提示
         document.getElementById('player-loading').style.display = 'none';
-        // 显示密码验证弹窗
-        showPasswordModal();
         return;
     }
 
-    console.log('[Player] Password verified, initializing page content');
     initializePageContent();
 });
 
@@ -128,11 +116,9 @@ document.addEventListener('passwordVerified', () => {
 
 // 初始化页面内容
 function initializePageContent() {
-    console.log('[Player] initializePageContent called');
-    
+
     // 解析URL参数
     const urlParams = new URLSearchParams(window.location.search);
-    console.log('[Player] URL params parsed:', Object.fromEntries(urlParams.entries()));
     
     const offlineMode = urlParams.get('offline');
     if (offlineMode === 'true') {
@@ -167,6 +153,14 @@ function initializePageContent() {
     }
     
     let videoUrl = urlParams.get('url');
+    // 确保URL被正确解码（处理双重编码情况）
+    if (videoUrl) {
+        try {
+            videoUrl = decodeURIComponent(videoUrl);
+        } catch (e) {
+            // 如果解码失败，尝试直接使用（可能未编码）
+        }
+    }
     const title = urlParams.get('title');
     const sourceCode = urlParams.get('source');
     let index = parseInt(urlParams.get('index') || '0');
@@ -269,16 +263,13 @@ function initializePageContent() {
     document.title = currentVideoTitle + ' - LibreTV播放器';
     document.getElementById('videoTitle').textContent = currentVideoTitle;
 
-    console.log('[Player] Video URL:', videoUrl);
-    console.log('[Player] Current video title:', currentVideoTitle);
-    
     // 初始化播放器
     if (videoUrl) {
-        console.log('[Player] Initializing player with URL:', videoUrl);
+        console.log('[LibreTV] 初始化播放器，URL:', videoUrl);
         initPlayer(videoUrl);
     } else {
-        console.error('[Player] No video URL provided, showing error');
-        showError('无效的视频链接，请返回首页重新选择视频');
+        console.error('[LibreTV] 无效的视频链接 - URL参数:', urlParams.toString());
+        showError('无效的视频链接');
     }
 
     // 渲染源信息
@@ -1974,28 +1965,18 @@ function openOfflineDB() {
     return new Promise((resolve, reject) => {
         if (offlineDB && !offlineDB.closed) { resolve(offlineDB); return; }
         offlineDB = null;
-        const request = indexedDB.open('LibreTVOffline', 6);
+        const request = indexedDB.open('LibreTVOffline', 5);
         request.onupgradeneeded = (e) => {
             const db = e.target.result;
             if (db.objectStoreNames.contains('segments')) {
                 db.deleteObjectStore('segments');
             }
             if (!db.objectStoreNames.contains('videos')) {
-                const videoStore = db.createObjectStore('videos', { keyPath: 'id' });
-                videoStore.createIndex('status', 'status', { unique: false });
-                videoStore.createIndex('sourceCode', 'sourceCode', { unique: false });
-                videoStore.createIndex('createdAt', 'createdAt', { unique: false });
-                videoStore.createIndex('expiresAt', 'expiresAt', { unique: false });
+                db.createObjectStore('videos', { keyPath: 'id' });
             }
-            const segmentStore = db.createObjectStore('segments', { keyPath: 'id' });
-            segmentStore.createIndex('cacheId', 'cacheId', { unique: false });
+            db.createObjectStore('segments', { keyPath: 'id' });
             if (!db.objectStoreNames.contains('blobs')) {
-                const blobStore = db.createObjectStore('blobs', { keyPath: 'id' });
-                blobStore.createIndex('cacheId', 'cacheId', { unique: false });
-            }
-            if (!db.objectStoreNames.contains('cache_meta')) {
-                const metaStore = db.createObjectStore('cache_meta', { keyPath: 'id' });
-                metaStore.createIndex('key', 'key', { unique: true });
+                db.createObjectStore('blobs', { keyPath: 'id' });
             }
         };
         request.onsuccess = (e) => {
@@ -2079,6 +2060,21 @@ async function getSegment(id) {
         req.onerror = () => reject(req.error);
     });
 }
+
+// 暴露离线缓存相关函数到 window 对象，供 offline.html 使用
+window.openOfflineDB = openOfflineDB;
+window.getOfflineVideo = getOfflineVideo;
+window.saveOfflineVideo = saveOfflineVideo;
+window.getAllOfflineVideos = getAllOfflineVideos;
+window.deleteOfflineVideo = deleteOfflineVideo;
+window.saveSegment = saveSegment;
+window.getSegment = getSegment;
+window.getOfflineCacheId = getOfflineCacheId;
+window.getOfflineEpisodeUrl = getOfflineEpisodeUrl;
+window.getOfflineEpisodeName = getOfflineEpisodeName;
+window.cacheEpisode = cacheEpisode;
+window.startEpisodeCache = startEpisodeCache;
+window.pauseCacheEpisode = pauseCacheEpisode;
 
 function getOfflineCacheId(episodeIndex) {
     const urlParams = new URLSearchParams(window.location.search);
@@ -2470,156 +2466,176 @@ function extractKeyInfoFromM3u8(m3u8Content, baseUrl) {
 }
 
 async function parseM3u8AndGetSegments(m3u8Url, signal) {
-    // 添加超时控制
-    const timeoutController = new AbortController();
-    const timeoutId = setTimeout(() => timeoutController.abort(), 30000); // 30秒超时
-    
-    // 组合信号
-    const combinedSignal = signal || timeoutController.signal;
-    
-    try {
-        let proxyUrl = PROXY_URL + encodeURIComponent(m3u8Url);
-        if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+    console.log('[缓存] 开始解析M3U8:', m3u8Url);
+
+    // 验证 URL 格式
+    if (!m3u8Url || typeof m3u8Url !== 'string' || m3u8Url.trim() === '') {
+        throw new Error('无效的M3U8地址');
+    }
+    if (!m3u8Url.includes('.m3u8') && !m3u8Url.includes('?')) {
+        console.warn('[缓存] M3U8 URL 可能不正确:', m3u8Url);
+    }
+
+    let proxyUrl = PROXY_URL + encodeURIComponent(m3u8Url);
+    console.log('[缓存] 使用代理URL:', proxyUrl.substring(0, 100) + '...');
+    if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+        try {
             proxyUrl = await window.ProxyAuth.addAuthToProxyUrl(proxyUrl);
+            console.log('[缓存] 添加鉴权后的代理URL:', proxyUrl.substring(0, 100) + '...');
+        } catch (authErr) {
+            console.warn('[缓存] 添加鉴权失败，使用原始代理URL:', authErr.message);
         }
-        
-        const resp = await fetch(proxyUrl, { signal: combinedSignal });
-        if (!resp.ok) throw new Error('M3U8请求失败: HTTP ' + resp.status);
+    }
+
+    // 设置超时机制 - 30秒超时
+    const timeoutMs = 30000;
+    let timeoutId;
+    const timeoutController = new AbortController();
+
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+            timeoutController.abort();
+            reject(new Error('M3U8解析超时（30秒）'));
+        }, timeoutMs);
+    });
+
+    // 合并外部 signal 和超时 signal
+    let combinedSignal;
+    if (signal) {
+        combinedSignal = new AbortController();
+        // 外部 signal 中止时，清除超时并中止组合 signal
+        signal.addEventListener('abort', () => {
+            combinedSignal.abort();
+            clearTimeout(timeoutId);
+        });
+        // 超时 signal 中止时，也要中止外部 signal
+        timeoutController.signal.addEventListener('abort', () => {
+            if (!signal.aborted) {
+                signal.abort();
+            }
+        });
+    } else {
+        combinedSignal = timeoutController;
+    }
+
+    try {
+        const fetchPromise = fetch(proxyUrl, { signal: combinedSignal.signal });
+        const resp = await Promise.race([fetchPromise, timeoutPromise]);
+        clearTimeout(timeoutId);
+
+        if (!resp.ok) {
+            throw new Error('M3U8请求失败: HTTP ' + resp.status);
+        }
         let content = await resp.text();
+
+        if (!content || content.trim() === '') {
+            throw new Error('M3U8内容为空');
+        }
+        console.log('[缓存] M3U8主文件获取成功，长度:', content.length);
+
         let baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
-        
-        const lines = content.split('\n').map(l => l.trim()).filter(l => l);
-        let bestStreamUrl = '';
-        let bestBandwidth = 0;
-        
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
-                const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
-                const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
-                if (bandwidth > bestBandwidth && i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
-                    bestBandwidth = bandwidth;
-                    let streamUrl = lines[i + 1];
-                    if (!streamUrl.startsWith('http') && !streamUrl.startsWith('/proxy/')) {
-                        streamUrl = baseUrl + streamUrl;
-                    }
-                    bestStreamUrl = streamUrl;
+    
+    const lines = content.split('\n').map(l => l.trim()).filter(l => l);
+    let bestStreamUrl = '';
+    let bestBandwidth = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
+            const bwMatch = lines[i].match(/BANDWIDTH=(\d+)/);
+            const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
+            if (bandwidth > bestBandwidth && i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
+                bestBandwidth = bandwidth;
+                let streamUrl = lines[i + 1];
+                if (!streamUrl.startsWith('http') && !streamUrl.startsWith('/proxy/')) {
+                    streamUrl = baseUrl + streamUrl;
+                }
+                bestStreamUrl = streamUrl;
+            }
+        }
+    }
+    
+    if (bestStreamUrl) {
+        console.log('[缓存] 找到最高质量流:', bestStreamUrl);
+        console.log('[缓存] 获取子播放列表...');
+
+        let streamProxyUrl;
+        if (bestStreamUrl.startsWith('/proxy/')) {
+            streamProxyUrl = bestStreamUrl;
+            if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+                try {
+                    streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
+                } catch (authErr) {
+                    console.warn('[缓存] 子播放列表鉴权失败:', authErr.message);
+                }
+            }
+        } else {
+            streamProxyUrl = PROXY_URL + encodeURIComponent(bestStreamUrl);
+            if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+                try {
+                    streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
+                } catch (authErr) {
+                    console.warn('[缓存] 子播放列表鉴权失败:', authErr.message);
                 }
             }
         }
-        
-        if (bestStreamUrl) {
-            let streamProxyUrl;
-            if (bestStreamUrl.startsWith('/proxy/')) {
-                streamProxyUrl = bestStreamUrl;
-                if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
-                    streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
-                }
-            } else {
-                streamProxyUrl = PROXY_URL + encodeURIComponent(bestStreamUrl);
-                if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
-                    streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
-                }
-            }
-            const streamResp = await fetch(streamProxyUrl, { signal: combinedSignal });
-            if (!streamResp.ok) throw new Error('子播放列表请求失败');
+
+        // 子播放列表也添加超时 - 20秒
+        const streamTimeoutId = setTimeout(() => {
+            throw new Error('子播放列表解析超时（20秒）');
+        }, 20000);
+
+        try {
+            const streamResp = await fetch(streamProxyUrl, { signal: combinedSignal.signal });
+            clearTimeout(streamTimeoutId);
+            if (!streamResp.ok) throw new Error('子播放列表请求失败: HTTP ' + streamResp.status);
             content = await streamResp.text();
+            if (!content || content.trim() === '') {
+                throw new Error('子播放列表内容为空');
+            }
+            console.log('[缓存] 子播放列表获取成功，分片数预估:', content.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length);
             if (bestStreamUrl.startsWith('http')) {
                 baseUrl = bestStreamUrl.substring(0, bestStreamUrl.lastIndexOf('/') + 1);
             }
+        } catch (streamErr) {
+            clearTimeout(streamTimeoutId);
+            throw streamErr;
         }
-        
-        const segmentUrls = [];
-        const m3u8Lines = content.split('\n');
-        for (const line of m3u8Lines) {
-            const trimmed = line.trim();
-            if (trimmed && !trimmed.startsWith('#')) {
-                if (trimmed.startsWith('http')) {
-                    segmentUrls.push(trimmed);
-                } else if (trimmed.startsWith('/proxy/')) {
-                    segmentUrls.push(trimmed);
-                } else {
-                    segmentUrls.push(baseUrl + trimmed);
-                }
+    }
+    
+    const segmentUrls = [];
+    const m3u8Lines = content.split('\n');
+    for (const line of m3u8Lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+            if (trimmed.startsWith('http')) {
+                segmentUrls.push(trimmed);
+            } else if (trimmed.startsWith('/proxy/')) {
+                segmentUrls.push(trimmed);
+            } else {
+                segmentUrls.push(baseUrl + trimmed);
             }
         }
-        const keyInfos = extractKeyInfoFromM3u8(content, baseUrl);
-        
-        clearTimeout(timeoutId);
-        
-        return { segmentUrls, m3u8Content: content, keyInfos };
-    } catch (error) {
-        clearTimeout(timeoutId);
-        
-        if (error.name === 'AbortError') {
-            throw new Error('M3U8解析超时，请检查网络连接');
-        }
-        
-        throw error;
     }
+    const keyInfos = extractKeyInfoFromM3u8(content, baseUrl);
+    return { segmentUrls, m3u8Content: content, keyInfos };
 }
 
-async function downloadSegment(segUrl, signal, retries = 5) {
-    const maxRetries = retries;
-    let retryCount = 0;
-    
-    while (retryCount < maxRetries) {
-        try {
-            // 添加超时控制
-            const timeoutController = new AbortController();
-            const timeoutId = setTimeout(() => timeoutController.abort(), 15000); // 15秒超时
-            
-            // 组合信号
-            const combinedSignal = signal || timeoutController.signal;
-            
-            let fetchUrl;
-            if (segUrl.startsWith('/proxy/')) {
-                fetchUrl = segUrl;
-                if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
-                    fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(fetchUrl);
-                }
-            } else {
-                fetchUrl = PROXY_URL + encodeURIComponent(segUrl);
-                if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
-                    fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(fetchUrl);
-                }
-            }
-            
-            const resp = await fetch(fetchUrl, { signal: combinedSignal });
-            
-            clearTimeout(timeoutId);
-            
-            if (!resp.ok) {
-                throw new Error('HTTP ' + resp.status);
-            }
-            
-            return await resp.arrayBuffer();
-        } catch (error) {
-            retryCount++;
-            
-            if (error.name === 'AbortError') {
-                if (retryCount < maxRetries) {
-                    console.warn(`分片下载超时，重试 ${retryCount}/${maxRetries}:`, segUrl);
-                    // 指数退避
-                    const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 5000);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    continue;
-                } else {
-                    throw new Error('分片下载超时，已达到最大重试次数');
-                }
-            }
-            
-            if (retryCount < maxRetries) {
-                console.warn(`分片下载失败，重试 ${retryCount}/${maxRetries}:`, error.message);
-                // 指数退避
-                const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 5000);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            } else {
-                throw error;
-            }
+async function downloadSegment(segUrl, signal) {
+    let fetchUrl;
+    if (segUrl.startsWith('/proxy/')) {
+        fetchUrl = segUrl;
+        if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+            fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(fetchUrl);
+        }
+    } else {
+        fetchUrl = PROXY_URL + encodeURIComponent(segUrl);
+        if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
+            fetchUrl = await window.ProxyAuth.addAuthToProxyUrl(fetchUrl);
         }
     }
-    
-    throw new Error('分片下载失败，已达到最大重试次数');
+    const resp = await fetch(fetchUrl, { signal });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    return await resp.arrayBuffer();
 }
 
 function pauseCacheEpisode(episodeIndex) {

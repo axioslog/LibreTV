@@ -1,10 +1,11 @@
-const CACHE_NAME = 'libretv-v3.2';
+const CACHE_NAME = 'libretv-v3.2.0';
 const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/player.html',
     '/offline.html',
     '/watch.html',
+    '/VERSION.txt',
     '/css/styles.css',
     '/css/index.css',
     '/css/player.css',
@@ -149,6 +150,12 @@ async function handleOfflineData(pathname) {
 
 self.addEventListener('fetch', event => {
     const url = new URL(event.request.url);
+
+    // VERSION.txt 始终不缓存，确保获取最新版本
+    if (url.pathname === '/VERSION.txt') {
+        event.respondWith(fetch(event.request));
+        return;
+    }
 
     if (url.pathname.startsWith('/offline-m3u8/') ||
         url.pathname.startsWith('/offline-seg/') ||
