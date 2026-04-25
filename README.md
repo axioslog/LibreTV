@@ -185,5 +185,7 @@ LibreTV 仅作为视频搜索工具，不存储、上传或分发任何视频内
 - 🔧 增强播放器初始化调试信息
 - 🔧 改进密码验证错误处理
 - 🔧 修复 VERSION.txt 缓存策略
+- 🔧 修复 player.js 中 offlineDB 重复声明错误
+- 🔧 解决与 offline-cache-enhanced.js 的变量冲突
 - 📝 添加详细的修复验证指南
 - ✅ 验证 Cloudflare 自动部署功能  

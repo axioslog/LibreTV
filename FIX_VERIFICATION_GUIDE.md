@@ -168,6 +168,21 @@
 2. 检查是否有离线缓存的视频
 3. 尝试刷新页面后再次点击
 
+### Q4: 控制台显示 "Identifier 'offlineDB' has already been declared" 错误
+
+**问题原因**：
+这是由于 `player.js` 和 `offline-cache-enhanced.js` 都声明了 `offlineDB` 变量导致的重复声明错误。
+
+**解决方案**：
+1. 确保已更新到最新版本（v3.2.0 或更高）
+2. 清除浏览器缓存并刷新页面
+3. 如果问题仍然存在，强制刷新（Ctrl + Shift + R）
+
+**技术细节**：
+- 已将 `player.js` 中的 `offlineDB` 改为 `window.offlineDB`
+- 避免了与 `offline-cache-enhanced.js` 的变量冲突
+- 两个文件现在可以正常共存
+
 ## 技术细节
 
 ### Service Worker 缓存策略
