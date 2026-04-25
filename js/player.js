@@ -528,9 +528,6 @@ function initPlayer(videoUrl, options = {}) {
     
     console.log('[Player] Player container found, initializing...');
     
-    // 清空播放器容器内容
-    playerContainer.innerHTML = '';
-    
     const isOffline = options.isOffline || false;
 
     // 销毁旧实例
