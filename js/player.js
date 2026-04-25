@@ -80,6 +80,7 @@ window.addEventListener('load', function () {
 // 全局变量
 let currentVideoTitle = '';
 let currentEpisodeIndex = 0;
+let currentSourceCode = ''; // 当前视频源代码
 let art = null; // 用于 ArtPlayer 实例
 let currentHls = null; // 跟踪当前HLS实例
 let currentEpisodes = [];
@@ -213,7 +214,10 @@ function initializePageContent() {
 
     // 从localStorage获取数据
     currentVideoTitle = title || localStorage.getItem('currentVideoTitle') || '未知视频';
+    currentSourceCode = sourceCode || localStorage.getItem('currentSourceCode') || '';
     currentEpisodeIndex = index;
+    
+    console.log('[Player] Current source code:', currentSourceCode);
 
     // 设置自动连播开关状态
     autoplayEnabled = localStorage.getItem('autoplayEnabled') !== 'false'; // 默认为true
