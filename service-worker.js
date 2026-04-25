@@ -180,8 +180,8 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // 对于 watch.html 和 player.html，完全跳过 Service Worker 处理
-    if (url.pathname === '/watch.html' || url.pathname === '/player.html') {
+    // 对于 watch.html、player.html 和 offline.html，完全跳过 Service Worker 处理
+    if (url.pathname === '/watch.html' || url.pathname === '/player.html' || url.pathname === '/offline.html') {
         // 不做任何处理，让浏览器直接请求
         return;
     }

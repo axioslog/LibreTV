@@ -2644,12 +2644,14 @@ async function downloadSegment(segUrl, signal, retries = 5) {
         try {
             // 添加超时控制
             const timeoutController = new AbortController();
-            const timeoutId = setTimeout(() => timeoutController.abort(), 15000); // 15秒超时
+            const timeoutId = setTimeout(() => timeoutController.abort(), 30000); // 30秒超时
             
             // 组合信号
             const combinedSignal = signal || timeoutController.signal;
             
             let fetchUrl;
+            let useProxy = true;
+            
             if (segUrl.startsWith('/proxy/')) {
                 fetchUrl = segUrl;
                 if (window.ProxyAuth && window.ProxyAuth.addAuthToProxyUrl) {
@@ -2662,13 +2664,36 @@ async function downloadSegment(segUrl, signal, retries = 5) {
                 }
             }
             
-            const resp = await fetch(fetchUrl, { signal: combinedSignal });
+            let resp;
+            
+            try {
+                // 首先尝试使用代理
+                console.log('[Cache] Downloading segment via proxy:', segUrl.substring(0, 50));
+                resp = await fetch(fetchUrl, { signal: combinedSignal });
+                if (!resp.ok) {
+                    console.warn('[Cache] Proxy download failed, trying direct URL:', resp.status);
+                    useProxy = false;
+                }
+            } catch (proxyError) {
+                console.warn('[Cache] Proxy download error, trying direct URL:', proxyError);
+                useProxy = false;
+            }
+            
+            // 如果代理失败，尝试直接请求
+            if (!useProxy) {
+                try {
+                    console.log('[Cache] Downloading segment directly:', segUrl.substring(0, 50));
+                    resp = await fetch(segUrl, { signal: combinedSignal });
+                    if (!resp.ok) {
+                        throw new Error('HTTP ' + resp.status);
+                    }
+                } catch (directError) {
+                    console.error('[Cache] Direct download also failed:', directError);
+                    throw new Error('代理和直接请求都失败');
+                }
+            }
             
             clearTimeout(timeoutId);
-            
-            if (!resp.ok) {
-                throw new Error('HTTP ' + resp.status);
-            }
             
             return await resp.arrayBuffer();
         } catch (error) {
