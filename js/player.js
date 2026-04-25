@@ -528,6 +528,9 @@ function initPlayer(videoUrl, options = {}) {
     
     console.log('[Player] Player container found, initializing...');
     
+    // 清空播放器容器内容
+    playerContainer.innerHTML = '';
+    
     const isOffline = options.isOffline || false;
 
     // 销毁旧实例
@@ -1508,8 +1511,10 @@ function setupLongPressSpeedControl() {
             isLongPress = false;
             showSpeedHint(originalPlaybackRate);
 
-            // 阻止长按后的点击事件
-            e.preventDefault();
+            // 只在可以取消的情况下阻止默认行为
+            if (e.cancelable) {
+                e.preventDefault();
+            }
         }
         // 如果不是长按，则允许正常的点击事件（暂停/播放）
     });
@@ -2502,8 +2507,34 @@ async function parseM3u8AndGetSegments(m3u8Url, signal) {
             proxyUrl = await window.ProxyAuth.addAuthToProxyUrl(proxyUrl);
         }
         
-        const resp = await fetch(proxyUrl, { signal: combinedSignal });
-        if (!resp.ok) throw new Error('M3U8请求失败: HTTP ' + resp.status);
+        let resp;
+        let useProxy = true;
+        
+        try {
+            // 首先尝试使用代理
+            resp = await fetch(proxyUrl, { signal: combinedSignal });
+            if (!resp.ok) {
+                console.warn('[Cache] Proxy request failed, trying direct URL:', resp.status);
+                useProxy = false;
+            }
+        } catch (proxyError) {
+            console.warn('[Cache] Proxy request error, trying direct URL:', proxyError);
+            useProxy = false;
+        }
+        
+        // 如果代理失败，尝试直接请求
+        if (!useProxy) {
+            try {
+                resp = await fetch(m3u8Url, { signal: combinedSignal });
+                if (!resp.ok) {
+                    throw new Error('M3U8请求失败: HTTP ' + resp.status);
+                }
+            } catch (directError) {
+                console.error('[Cache] Direct request also failed:', directError);
+                throw new Error('M3U8请求失败: 代理和直接请求都失败');
+            }
+        }
+        
         let content = await resp.text();
         let baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
         
@@ -2539,8 +2570,35 @@ async function parseM3u8AndGetSegments(m3u8Url, signal) {
                     streamProxyUrl = await window.ProxyAuth.addAuthToProxyUrl(streamProxyUrl);
                 }
             }
-            const streamResp = await fetch(streamProxyUrl, { signal: combinedSignal });
-            if (!streamResp.ok) throw new Error('子播放列表请求失败');
+            
+            let streamResp;
+            let useStreamProxy = true;
+            
+            try {
+                // 首先尝试使用代理
+                streamResp = await fetch(streamProxyUrl, { signal: combinedSignal });
+                if (!streamResp.ok) {
+                    console.warn('[Cache] Stream proxy request failed, trying direct URL:', streamResp.status);
+                    useStreamProxy = false;
+                }
+            } catch (streamProxyError) {
+                console.warn('[Cache] Stream proxy request error, trying direct URL:', streamProxyError);
+                useStreamProxy = false;
+            }
+            
+            // 如果代理失败，尝试直接请求
+            if (!useStreamProxy) {
+                try {
+                    streamResp = await fetch(bestStreamUrl, { signal: combinedSignal });
+                    if (!streamResp.ok) {
+                        throw new Error('子播放列表请求失败: HTTP ' + streamResp.status);
+                    }
+                } catch (streamDirectError) {
+                    console.error('[Cache] Stream direct request also failed:', streamDirectError);
+                    throw new Error('子播放列表请求失败: 代理和直接请求都失败');
+                }
+            }
+            
             content = await streamResp.text();
             if (bestStreamUrl.startsWith('http')) {
                 baseUrl = bestStreamUrl.substring(0, bestStreamUrl.lastIndexOf('/') + 1);
