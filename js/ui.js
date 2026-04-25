@@ -979,13 +979,26 @@ function _openOfflineDB() {
     return new Promise((resolve, reject) => {
         if (_offlineDB && !_offlineDB.closed) { resolve(_offlineDB); return; }
         _offlineDB = null;
-        const request = indexedDB.open('LibreTVOffline', 5);
+        const request = indexedDB.open('LibreTVOffline', 6);
         request.onupgradeneeded = (e) => {
             const db = e.target.result;
             if (db.objectStoreNames.contains('segments')) db.deleteObjectStore('segments');
-            if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath: 'id' });
-            db.createObjectStore('segments', { keyPath: 'id' });
-            if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('videos')) {
+                const videoStore = db.createObjectStore('videos', { keyPath: 'id' });
+                videoStore.createIndex('status', 'status', { unique: false });
+                videoStore.createIndex('sourceCode', 'sourceCode', { unique: false });
+                videoStore.createIndex('createdAt', 'createdAt', { unique: false });
+                videoStore.createIndex('expiresAt', 'expiresAt', { unique: false });
+            }
+            const segmentStore = db.createObjectStore('segments', { keyPath: 'id' });
+            segmentStore.createIndex('cacheId', 'cacheId', { unique: false });
+            if (!db.objectStoreNames.contains('blobs')) {
+                db.createObjectStore('blobs', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('cache_meta')) {
+                const metaStore = db.createObjectStore('cache_meta', { keyPath: 'id' });
+                metaStore.createIndex('key', 'key', { unique: true });
+            }
         };
         request.onsuccess = (e) => {
             _offlineDB = e.target.result;
@@ -1035,7 +1048,13 @@ async function _deleteOfflineVideo(id) {
 }
 
 async function showIndexOfflineList() {
-    window.open('offline.html', '_blank');
+    try {
+        console.log('[Offline] Opening offline list page');
+        window.open('offline.html', '_blank');
+    } catch (error) {
+        console.error('[Offline] Failed to open offline list:', error);
+        showToast('无法打开离线管理页面，请检查浏览器设置', 'error');
+    }
 }
 
 async function playFromOfflineList(id) {
