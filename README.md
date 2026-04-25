@@ -173,4 +173,12 @@ LibreTV 仅作为视频搜索工具，不存储、上传或分发任何视频内
 
 - **[Sharon](https://sharon.io)**
 - **[ZMTO](https://zmto.com)**
-- **[YXVM](https://yxvm.com)**  
+- **[YXVM](https://yxvm.com)**
+
+---
+
+## 📝 更新日志
+
+### v3.2.0 (2026-04-25)
+- 测试 Cloudflare 自动部署功能
+- 验证 GitHub webhook 触发机制  
