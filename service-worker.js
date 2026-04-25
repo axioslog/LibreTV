@@ -153,7 +153,7 @@ self.addEventListener('fetch', event => {
 
     // VERSION.txt 始终不缓存，确保获取最新版本
     if (url.pathname === '/VERSION.txt') {
-        event.respondWith(fetch(event.request));
+        event.respondWith(fetch(event.request, { redirect: 'follow' }));
         return;
     }
 
@@ -177,6 +177,12 @@ self.addEventListener('fetch', event => {
     }
 
     if (url.origin !== self.location.origin) {
+        return;
+    }
+
+    // 对于 watch.html 和 player.html，不使用缓存，直接请求
+    if (url.pathname === '/watch.html' || url.pathname === '/player.html') {
+        event.respondWith(fetch(event.request, { redirect: 'follow' }));
         return;
     }
 
