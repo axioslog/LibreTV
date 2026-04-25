@@ -1951,7 +1951,11 @@ async function switchToResource(sourceKey, vodId) {
 // =================================
 // ========== 离线缓存功能 ==========
 // =================================
-let offlineDB = null;
+// 避免与 offline-cache-enhanced.js 中的 offlineDB 冲突
+// 使用 window 对象来避免重复声明
+if (!window.offlineDB) {
+    window.offlineDB = null;
+}
 let activeCaches = {};
 
 function waitForServiceWorker() {
@@ -1972,8 +1976,8 @@ function waitForServiceWorker() {
 
 function openOfflineDB() {
     return new Promise((resolve, reject) => {
-        if (offlineDB && !offlineDB.closed) { resolve(offlineDB); return; }
-        offlineDB = null;
+        if (window.offlineDB && !window.offlineDB.closed) { resolve(window.offlineDB); return; }
+        window.offlineDB = null;
         const request = indexedDB.open('LibreTVOffline', 6);
         request.onupgradeneeded = (e) => {
             const db = e.target.result;
@@ -1999,13 +2003,13 @@ function openOfflineDB() {
             }
         };
         request.onsuccess = (e) => {
-            offlineDB = e.target.result;
-            offlineDB.onclose = () => { offlineDB = null; };
-            offlineDB.onversionchange = () => { offlineDB.close(); offlineDB = null; };
-            resolve(offlineDB);
+            window.offlineDB = e.target.result;
+            window.offlineDB.onclose = () => { window.offlineDB = null; };
+            window.offlineDB.onversionchange = () => { window.offlineDB.close(); window.offlineDB = null; };
+            resolve(window.offlineDB);
         };
-        request.onerror = (e) => { offlineDB = null; reject(e.target.error); };
-        request.onblocked = () => { offlineDB = null; reject(new Error('数据库被占用，请关闭其他标签页后刷新')); };
+        request.onerror = (e) => { window.offlineDB = null; reject(e.target.error); };
+        request.onblocked = () => { window.offlineDB = null; reject(new Error('数据库被占用，请关闭其他标签页后刷新')); };
     });
 }
 
