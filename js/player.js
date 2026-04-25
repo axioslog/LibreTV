@@ -2512,7 +2512,9 @@ async function parseM3u8AndGetSegments(m3u8Url, signal) {
         
         try {
             // 首先尝试使用代理
+            console.log('[Cache] Trying proxy URL:', proxyUrl);
             resp = await fetch(proxyUrl, { signal: combinedSignal });
+            console.log('[Cache] Proxy response status:', resp.status);
             if (!resp.ok) {
                 console.warn('[Cache] Proxy request failed, trying direct URL:', resp.status);
                 useProxy = false;
@@ -2525,7 +2527,9 @@ async function parseM3u8AndGetSegments(m3u8Url, signal) {
         // 如果代理失败，尝试直接请求
         if (!useProxy) {
             try {
+                console.log('[Cache] Trying direct URL:', m3u8Url);
                 resp = await fetch(m3u8Url, { signal: combinedSignal });
+                console.log('[Cache] Direct response status:', resp.status);
                 if (!resp.ok) {
                     throw new Error('M3U8请求失败: HTTP ' + resp.status);
                 }
