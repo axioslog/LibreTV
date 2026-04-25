@@ -180,9 +180,9 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // 对于 watch.html 和 player.html，不使用缓存，直接请求
+    // 对于 watch.html 和 player.html，完全跳过 Service Worker 处理
     if (url.pathname === '/watch.html' || url.pathname === '/player.html') {
-        event.respondWith(fetch(event.request, { redirect: 'follow' }));
+        // 不做任何处理，让浏览器直接请求
         return;
     }
 
